@@ -1,0 +1,12 @@
+.git
+node_modules
+**/node_modules
+apps/mobile
+**/.expo
+web-build
+coverage
+dist
+**/.env
+**/*.test.ts
+*.md
+npm-debug.*

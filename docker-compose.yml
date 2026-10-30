@@ -15,5 +15,24 @@ services:
       timeout: 5s
       retries: 10
 
+  api:
+    profiles: ["api"]
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://rev:rev@postgres:5432/revapp
+      LLM_PROVIDER: ${LLM_PROVIDER:-fake}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://generativelanguage.googleapis.com/v1beta/openai}
+      LLM_MODEL: ${LLM_MODEL:-gemini-3.8-flash}
+      LLM_JSON_MODE: ${LLM_JSON_MODE:-object}
+      DEV_USER_EMAIL: ${DEV_USER_EMAIL:-dev@localhost}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   rev_pg:
