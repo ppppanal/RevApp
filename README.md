@@ -73,22 +73,13 @@ docker run --rm -p 3000:3000 \
   rev-api
 ```
 
-## Deploy on Render
+## Hosting
 
-This environment has no Render credentials, so nothing is deployed from here. The blueprint in `render.yaml` describes a free web service (`rev-api`) and the one free Postgres instance a workspace can have (`rev-postgres`, PostgreSQL 16, database `revapp`). They are both in Oregon so the API can use the private `DATABASE_URL`. Cloudflare Workers cannot run this Express process plus Postgres.
+The image in `apps/api/Dockerfile` is the deploy artifact. No free container host can keep this Express process and PostgreSQL running without a credit card, so this repo has no host blueprint.
 
-Free web services sleep after 15 minutes without traffic and take about a minute to wake. A workspace gets 750 free instance hours per month. Free Postgres is 1 GB, has no backups, and expires 30 days after creation. After that there is a 14-day window to move it to a paid plan before Render deletes it. Do not put real notes there.
+Railway’s no-card trial is a one-time $5 credit for 30 days, then $1 of credit a month. At Railway’s published rates ($10 per GB of RAM per month), an always-on API plus Postgres costs more than that credit, and continuing means the Hobby plan and a card. Northflank’s sandbox, Fly.io, Koyeb, and the major clouds require a card before this stack stays up. Render Blueprints are a paid flow and are not used here.
 
-1. Merge this branch so `render.yaml` and `apps/api/Dockerfile` are on the branch you will deploy (usually `main`).
-2. Create a Render account and connect GitHub: [https://dashboard.render.com](https://dashboard.render.com).
-3. In the dashboard, choose **New** → **Blueprint**.
-4. Select the `ppppanal/RevApp` repository. If you are deploying before the merge, set the branch to the branch that contains `render.yaml`.
-5. Render reads `render.yaml` and plans `rev-api` (free web) plus `rev-postgres` (free Postgres). Apply the blueprint.
-6. When Render prompts for `LLM_API_KEY`, paste a Gemini API key from Google AI Studio. Leave the field empty only if you later set `LLM_PROVIDER=fake` in the service environment. Do not commit the key.
-7. Wait for the first deploy. The image runs migrations before it listens. Open the service URL Render shows and request `/health`. A ready service returns `{"ok":true}`.
-8. Point the Expo app at that URL with `EXPO_PUBLIC_API_URL` (no trailing slash).
-
-`PORT` is set by Render. `DATABASE_URL` comes from the blueprint (`fromDatabase` / `connectionString`) and is not written into the repo. The container listens on `0.0.0.0`.
+Run the image locally with the Docker commands above. On a host you already pay for, publish port 3000, set `DATABASE_URL`, and set `LLM_API_KEY` in the host’s secret store. The process listens on `0.0.0.0` and applies migrations before it serves traffic.
 
 ## Tests
 
