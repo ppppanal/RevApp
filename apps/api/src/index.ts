@@ -36,6 +36,7 @@ const app = createApp({
   resolveUser: () => resolveDevUser(prisma, config.devUserEmail),
 });
 
-app.listen(config.port, () => {
-  console.log(`API listening on http://localhost:${config.port}`);
+const host = process.env.HOST?.trim() || "0.0.0.0";
+app.listen(config.port, host, () => {
+  console.log(`API listening on http://${host}:${config.port}`);
 });
