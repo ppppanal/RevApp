@@ -1,0 +1,28 @@
+# Expo web export only. API hosting is a separate deploy.
+services:
+  - type: web
+    name: rev-study
+    runtime: static
+    buildCommand: npm ci --include=dev && npm run export:web
+    staticPublishPath: apps/mobile/dist
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: SKIP_INSTALL_DEPS
+        value: "true"
+      - key: EXPO_NO_TELEMETRY
+        value: "1"
+      # Public API origin, no trailing slash. Inlined into the web bundle at build time.
+      - key: EXPO_PUBLIC_API_URL
+        sync: false
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    buildFilter:
+      paths:
+        - apps/mobile/**
+        - packages/shared/**
+        - package.json
+        - package-lock.json
+        - render.yaml

@@ -12,6 +12,7 @@
   "scripts": {
     "dev:api": "npm run dev -w @rev/api",
     "dev:mobile": "npm run start -w @rev/mobile",
+    "export:web": "npm run export:web -w @rev/mobile",
     "test": "npm run test -w @rev/api",
     "typecheck": "npm run typecheck --workspaces --if-present"
   }
