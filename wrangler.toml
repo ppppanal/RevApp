@@ -1,0 +1,6 @@
+# Cloudflare Pages on the Free plan. This is not a Worker.
+# Git builds do not read the build command from this file.
+# Set that command in the dashboard, as described in the README.
+name = "rev-study"
+pages_build_output_dir = "apps/mobile/dist"
+compatibility_date = "2026-10-30"
