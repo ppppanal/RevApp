@@ -1,0 +1,148 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String    @id @default(cuid())
+  email     String    @unique
+  name      String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  subjects  Subject[]
+  notes     Note[]
+  tags      Tag[]
+}
+
+model Subject {
+  id        String   @id @default(cuid())
+  name      String
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  notes     Note[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, name])
+  @@index([userId])
+}
+
+model Note {
+  id          String       @id @default(cuid())
+  title       String
+  rawText     String
+  cleanedText String
+  summary     String?
+  status      NoteStatus   @default(PROCESSING)
+  userId      String
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subjectId   String?
+  subject     Subject?     @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  sourceFiles SourceFile[]
+  keyPoints   KeyPoint[]
+  flashcards  Flashcard[]
+  tags        Tag[]
+  revisions   Revision[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([userId])
+  @@index([subjectId])
+}
+
+model SourceFile {
+  id            String     @id @default(cuid())
+  noteId        String
+  note          Note       @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  kind          SourceKind
+  filename      String?
+  mimeType      String?
+  extractedText String?
+  createdAt     DateTime   @default(now())
+
+  @@index([noteId])
+}
+
+model KeyPoint {
+  id        String       @id @default(cuid())
+  noteId    String
+  note      Note         @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  kind      KeyPointKind
+  content   String
+  position  Int
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  @@unique([noteId, position])
+  @@index([noteId])
+}
+
+model Flashcard {
+  id        String   @id @default(cuid())
+  noteId    String
+  note      Note     @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  question  String
+  answer    String
+  position  Int
+  edited    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([noteId, position])
+  @@index([noteId])
+}
+
+model Tag {
+  id        String   @id @default(cuid())
+  name      String
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  notes     Note[]
+  createdAt DateTime @default(now())
+
+  @@unique([userId, name])
+  @@index([userId])
+}
+
+model Revision {
+  id        String         @id @default(cuid())
+  noteId    String
+  note      Note           @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  target    RevisionTarget
+  targetId  String?
+  field     String
+  before    String
+  after     String
+  createdAt DateTime       @default(now())
+
+  @@index([noteId])
+  @@index([targetId])
+}
+
+enum NoteStatus {
+  PROCESSING
+  READY
+  FAILED
+}
+
+enum SourceKind {
+  TEXT
+  PDF
+  IMAGE
+}
+
+enum KeyPointKind {
+  DEFINITION
+  FORMULA
+  FACT
+}
+
+enum RevisionTarget {
+  SUMMARY
+  KEY_POINT
+  FLASHCARD
+}
