@@ -13,6 +13,7 @@ import { FlashcardService } from "./services/flashcard-service";
 import { StudyGenerationService } from "./services/generation-service";
 import { NoteService } from "./services/note-service";
 import { resolveDevUser } from "./services/dev-user";
+import { MemoryObjectStore } from "./storage/memory-store";
 import { cleanNoteText } from "./text/clean-text";
 
 const integrationEnabled = process.env.REV_INTEGRATION === "1";
@@ -52,11 +53,12 @@ class StaticProvider implements LlmProvider {
 describe.skipIf(!integrationEnabled)("text path", () => {
   let prisma: PrismaClient;
   const provider = new StaticProvider([JSON.stringify(studyPack)]);
+  const files = new MemoryObjectStore();
 
   beforeAll(() => {
     execFileSync("npx", ["prisma", "migrate", "deploy"], {
       cwd: resolve(dirname(fileURLToPath(import.meta.url)), ".."),
-      env: { ...process.env, DATABASE_URL: databaseUrl },
+      env: { ...process.env, DATABASE_URL: databaseUrl, DIRECT_URL: databaseUrl },
       stdio: "inherit",
     });
     prisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
@@ -66,6 +68,7 @@ describe.skipIf(!integrationEnabled)("text path", () => {
     provider.calls = 0;
     provider.messages = [];
     provider.results = [JSON.stringify(studyPack)];
+    files.objects.clear();
     await prisma.user.deleteMany({ where: { email } });
   });
 
@@ -78,7 +81,7 @@ describe.skipIf(!integrationEnabled)("text path", () => {
 
   function services(active: LlmProvider): AppServices {
     return {
-      notes: new NoteService(prisma, new RoutingTextExtractor(), new StudyGenerationService(active, 1000)),
+      notes: new NoteService(prisma, new RoutingTextExtractor(), new StudyGenerationService(active, 1000), files),
       flashcards: new FlashcardService(prisma),
       resolveUser: () => resolveDevUser(prisma, email),
     };
@@ -114,6 +117,7 @@ describe.skipIf(!integrationEnabled)("text path", () => {
     expect(stored.rawText).toBe(raw.replace(/\u0000/g, ""));
     expect(stored.rawText).not.toContain("\u0000");
     expect(stored.sourceFiles[0]?.kind).toBe("TEXT");
+    expect(stored.sourceFiles[0]?.storageKey).toBeNull();
     expect(stored.keyPoints).toHaveLength(2);
     expect(stored.flashcards).toHaveLength(2);
 
@@ -188,7 +192,11 @@ describe.skipIf(!integrationEnabled)("text path", () => {
       where: { id: created.body.id },
       include: { sourceFiles: true },
     });
-    expect(stored.sourceFiles[0]).toMatchObject({ kind: "PDF", filename: "cells.pdf" });
+    expect(stored.sourceFiles[0]).toMatchObject({ kind: "PDF", filename: "cells.pdf", mimeType: "application/pdf" });
+    expect(stored.sourceFiles[0]?.storageKey).toMatch(/\/cells\.pdf$/);
+    const saved = files.objects.get(stored.sourceFiles[0]?.storageKey ?? "");
+    expect(saved?.contentType).toBe("application/pdf");
+    expect(saved?.body.byteLength).toBeGreaterThan(0);
   });
 
   it("hides another user's flashcard", async () => {

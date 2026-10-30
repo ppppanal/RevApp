@@ -15,12 +15,45 @@ const envSchema = z.object({
   LLM_MODEL: z.string().trim().min(1).default("gemini-3.8-flash"),
   LLM_TIMEOUT_MS: z.coerce.number().int().positive().default(45_000),
   LLM_JSON_MODE: z.enum(["object", "off"]).default("object"),
+  R2_ENDPOINT: z.string().optional().default(""),
+  R2_ACCESS_KEY_ID: z.string().optional().default(""),
+  R2_SECRET_ACCESS_KEY: z.string().optional().default(""),
+  R2_BUCKET: z.string().optional().default(""),
+}).superRefine((value, ctx) => {
+  const fields = [value.R2_ENDPOINT, value.R2_ACCESS_KEY_ID, value.R2_SECRET_ACCESS_KEY, value.R2_BUCKET];
+  const present = fields.filter((field) => field.trim().length > 0).length;
+  if (present !== 0 && present !== fields.length) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Set R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, and R2_BUCKET together.",
+    });
+    return;
+  }
+  if (present === 0) return;
+  let endpoint: URL;
+  try {
+    endpoint = new URL(value.R2_ENDPOINT.trim());
+  } catch {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "R2_ENDPOINT must be an https URL.", path: ["R2_ENDPOINT"] });
+    return;
+  }
+  if (endpoint.protocol !== "https:") {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "R2_ENDPOINT must be an https URL.", path: ["R2_ENDPOINT"] });
+  }
 });
+
+export interface R2Config {
+  endpoint: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  bucket: string;
+}
 
 export interface AppConfig {
   port: number;
   databaseUrl: string;
   devUserEmail: string;
+  r2: R2Config | null;
   llm: {
     provider: "openai" | "fake";
     baseUrl: string;
@@ -43,10 +76,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     throw new Error(`Invalid environment: ${message}`);
   }
 
+  const r2Configured = parsed.data.R2_BUCKET.trim().length > 0;
   return {
     port: parsed.data.PORT,
     databaseUrl: parsed.data.DATABASE_URL,
     devUserEmail: parsed.data.DEV_USER_EMAIL,
+    r2: r2Configured
+      ? {
+          endpoint: parsed.data.R2_ENDPOINT.trim(),
+          accessKeyId: parsed.data.R2_ACCESS_KEY_ID.trim(),
+          secretAccessKey: parsed.data.R2_SECRET_ACCESS_KEY.trim(),
+          bucket: parsed.data.R2_BUCKET.trim(),
+        }
+      : null,
     llm: {
       provider: parsed.data.LLM_PROVIDER,
       baseUrl: parsed.data.LLM_BASE_URL,

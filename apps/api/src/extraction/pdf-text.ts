@@ -4,7 +4,9 @@ import { AppError } from "../errors";
 const maxPdfPages = 50;
 
 export async function readPdfText(data: Uint8Array): Promise<string> {
-  const pdf = await getDocumentProxy(data);
+  // PDF.js transfers the buffer to its worker, which detaches the caller's copy.
+  const bytes = new Uint8Array(data);
+  const pdf = await getDocumentProxy(bytes);
   try {
     if (pdf.numPages > maxPdfPages) {
       throw new AppError(

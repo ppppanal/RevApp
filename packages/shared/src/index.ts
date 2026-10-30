@@ -10,6 +10,7 @@ export const apiErrorCodes = [
   "UNSUPPORTED_SOURCE",
   "EMPTY_TEXT",
   "EXTRACTION_FAILED",
+  "STORAGE_FAILED",
   "TIMEOUT",
   "INVALID_JSON",
   "PROVIDER_ERROR",

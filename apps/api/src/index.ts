@@ -15,6 +15,7 @@ const { StudyGenerationService } = await import("./services/generation-service")
 const { NoteService } = await import("./services/note-service");
 const { FlashcardService } = await import("./services/flashcard-service");
 const { resolveDevUser } = await import("./services/dev-user");
+const { createR2ObjectStore } = await import("./storage/r2-store");
 
 const config = loadConfig();
 assertServerConfig(config);
@@ -31,7 +32,12 @@ const provider =
 
 const generation = new StudyGenerationService(provider, config.llm.timeoutMs);
 const app = createApp({
-  notes: new NoteService(prisma, new RoutingTextExtractor(), generation),
+  notes: new NoteService(
+    prisma,
+    new RoutingTextExtractor(),
+    generation,
+    config.r2 ? createR2ObjectStore(config.r2) : null,
+  ),
   flashcards: new FlashcardService(prisma),
   resolveUser: () => resolveDevUser(prisma, config.devUserEmail),
 });

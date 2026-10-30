@@ -20,5 +20,33 @@ describe("loadConfig", () => {
 
     const fake = loadConfig({ DATABASE_URL: databaseUrl, LLM_PROVIDER: "fake" });
     expect(() => assertServerConfig(fake)).not.toThrow();
+    expect(fake.r2).toBeNull();
+  });
+
+  it("reads R2 settings only when the endpoint, keys, and bucket are all set", () => {
+    expect(() => loadConfig({ DATABASE_URL: databaseUrl, R2_BUCKET: "notes" })).toThrow(/R2_ENDPOINT/);
+
+    const config = loadConfig({
+      DATABASE_URL: databaseUrl,
+      R2_ENDPOINT: "https://account.r2.cloudflarestorage.com",
+      R2_ACCESS_KEY_ID: "access",
+      R2_SECRET_ACCESS_KEY: "secret",
+      R2_BUCKET: "notes",
+    });
+    expect(config.r2).toEqual({
+      endpoint: "https://account.r2.cloudflarestorage.com",
+      accessKeyId: "access",
+      secretAccessKey: "secret",
+      bucket: "notes",
+    });
+    expect(() =>
+      loadConfig({
+        DATABASE_URL: databaseUrl,
+        R2_ENDPOINT: "http://account.r2.cloudflarestorage.com",
+        R2_ACCESS_KEY_ID: "access",
+        R2_SECRET_ACCESS_KEY: "secret",
+        R2_BUCKET: "notes",
+      }),
+    ).toThrow(/https/);
   });
 });
