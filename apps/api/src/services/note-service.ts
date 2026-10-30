@@ -1,7 +1,10 @@
-import type { NoteResponse, NoteSummary } from "@rev/shared";
+import { maxNoteTextLength, type NoteResponse, type NoteSummary } from "@rev/shared";
 import type { Prisma, PrismaClient } from "@prisma/client";
+import { randomUUID } from "node:crypto";
 import { AppError } from "../errors";
 import type { TextExtractor } from "../extraction/extractors";
+import { imageContentType, sourceObjectKey } from "../storage/object-key";
+import type { ObjectStore } from "../storage/object-store";
 import { cleanNoteText, deriveTitle, stripNullBytes } from "../text/clean-text";
 import type { StudyGenerationService } from "./generation-service";
 import type { CreateNoteCommand, NoteApi } from "./types";
@@ -19,14 +22,31 @@ export class NoteService implements NoteApi {
     private readonly prisma: PrismaClient,
     private readonly extractor: TextExtractor,
     private readonly generation: StudyGenerationService,
+    private readonly files: ObjectStore | null = null,
   ) {}
 
   async create(userId: string, command: CreateNoteCommand): Promise<NoteResponse> {
+    if (command.source.kind !== "text" && !this.files) {
+      throw new AppError(
+        "STORAGE_FAILED",
+        "File storage is not configured. Set R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, and R2_BUCKET.",
+        503,
+      );
+    }
     const extracted = await this.extractor.extract(command.source);
     const cleaned = cleanNoteText(extracted);
     if (!cleaned) {
       throw new AppError("EMPTY_TEXT", "Note text is empty after cleaning.", 400);
     }
+    if (cleaned.length > maxNoteTextLength) {
+      throw new AppError(
+        "VALIDATION",
+        `Extracted text is longer than ${maxNoteTextLength.toLocaleString("en-US")} characters. Use a shorter section.`,
+        400,
+      );
+    }
+
+    const stored = await this.storeUpload(userId, command);
 
     const subject = command.subjectName
       ? await this.prisma.subject.upsert({
@@ -46,9 +66,11 @@ export class NoteService implements NoteApi {
         subjectId: subject?.id,
         sourceFiles: {
           create: {
+            id: stored?.id,
             kind: command.source.kind === "text" ? "TEXT" : command.source.kind === "pdf" ? "PDF" : "IMAGE",
             filename: command.source.kind === "text" ? null : command.source.filename,
-            mimeType: command.source.kind === "image" ? command.source.mimeType : undefined,
+            mimeType: stored?.mimeType ?? (command.source.kind === "image" ? command.source.mimeType : undefined),
+            storageKey: stored?.key,
             extractedText: stripNullBytes(extracted),
           },
         },
@@ -119,6 +141,35 @@ export class NoteService implements NoteApi {
     });
     if (!note) throw new AppError("NOT_FOUND", "Note not found.", 404);
     return toNoteResponse(note);
+  }
+
+  private async storeUpload(
+    userId: string,
+    command: CreateNoteCommand,
+  ): Promise<{ id: string; key: string; mimeType: string } | null> {
+    if (command.source.kind === "text") return null;
+    if (!this.files) {
+      throw new AppError("STORAGE_FAILED", "File storage is not configured.", 503);
+    }
+    const data = command.source.data;
+    if (!data || data.byteLength === 0) {
+      throw new AppError("VALIDATION", command.source.kind === "pdf" ? "Attach a PDF file." : "Attach an image.", 400);
+    }
+    const id = randomUUID();
+    const mimeType = command.source.kind === "pdf" ? "application/pdf" : imageContentType(command.source.mimeType);
+    const key = sourceObjectKey({
+      userId,
+      sourceId: id,
+      filename: command.source.filename,
+      kind: command.source.kind,
+    });
+    try {
+      await this.files.put({ key, body: data, contentType: mimeType });
+    } catch (error) {
+      console.error("Object upload failed", error instanceof Error ? error.name : "Error");
+      throw new AppError("STORAGE_FAILED", "Could not store this file.", 502);
+    }
+    return { id, key, mimeType };
   }
 }
 
