@@ -1,4 +1,4 @@
-import type { NoteResponse, NoteSummary } from "@rev/shared";
+import { maxNoteTextLength, type NoteResponse, type NoteSummary } from "@rev/shared";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { AppError } from "../errors";
 import type { TextExtractor } from "../extraction/extractors";
@@ -26,6 +26,13 @@ export class NoteService implements NoteApi {
     const cleaned = cleanNoteText(extracted);
     if (!cleaned) {
       throw new AppError("EMPTY_TEXT", "Note text is empty after cleaning.", 400);
+    }
+    if (cleaned.length > maxNoteTextLength) {
+      throw new AppError(
+        "VALIDATION",
+        `Extracted text is longer than ${maxNoteTextLength.toLocaleString("en-US")} characters. Use a shorter section.`,
+        400,
+      );
     }
 
     const subject = command.subjectName

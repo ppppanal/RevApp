@@ -1,8 +1,18 @@
 # Rev
 
-Turn plain-text notes into a summary, key points, and flashcards.
+Turn notes, PDFs, and photos into a summary, key points, and flashcards.
 
-Notes belong to a local dev user (`DEV_USER_EMAIL`) until accounts have a login. PDF and image extraction use the same interface as text and return a clear “not available yet” error.
+Paste text, upload a PDF that has a text layer, or upload a photo of printed text. The API extracts the text, then an LLM returns a summary, key points, and flashcards. In the app, flip and edit cards, or take a quiz scored against the saved answers.
+
+Notes belong to a local dev user (`DEV_USER_EMAIL`) until accounts have a login. PDF and image bytes travel as base64 on the same note endpoint as plain text. Extraction stays behind one text-extraction interface. Image OCR uses Tesseract locally (English trained data shipped with the API). It does not call a paid OCR service.
+
+Limits:
+
+- Files up to 6 MB, and at most 50 PDF pages.
+- Extracted text is capped at 20,000 characters.
+- Scanned PDFs with no text layer are rejected. OCR is for images, not for PDF pages.
+- Password-protected PDFs are rejected.
+- OCR is English only. Handwriting and blurry photos often return no text.
 
 ## Run locally
 
@@ -38,12 +48,20 @@ npm run web -w @rev/mobile
 
 `EXPO_PUBLIC_API_URL` defaults to `http://localhost:3000`. Use your computer’s LAN address for a phone, and `http://10.0.2.2:3000` for the Android emulator.
 
-Create a note:
+Create a note from text:
 
 ```bash
 curl -s -X POST http://localhost:3000/notes \
   -H 'content-type: application/json' \
   -d '{"text":"Mitochondria produce ATP. ATP is the energy currency of the cell."}'
+```
+
+Or from a PDF:
+
+```bash
+curl -s -X POST http://localhost:3000/notes \
+  -H 'content-type: application/json' \
+  -d "{\"source\":{\"kind\":\"pdf\",\"filename\":\"notes.pdf\",\"data\":\"$(base64 notes.pdf | tr -d '\n')\"}}"
 ```
 
 Set `LLM_PROVIDER=fake` in `apps/api/.env` to exercise the app without calling a model.

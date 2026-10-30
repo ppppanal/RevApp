@@ -6,6 +6,8 @@ import request from "supertest";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createApp, type AppServices } from "./app";
 import { RoutingTextExtractor } from "./extraction/extractors";
+import { shutdownImageOcr } from "./extraction/image-ocr";
+import { textPdf } from "./extraction/text-pdf";
 import type { ChatMessage, LlmCompletionOptions, LlmProvider } from "./llm/provider";
 import { FlashcardService } from "./services/flashcard-service";
 import { StudyGenerationService } from "./services/generation-service";
@@ -68,6 +70,7 @@ describe.skipIf(!integrationEnabled)("text path", () => {
   });
 
   afterAll(async () => {
+    await shutdownImageOcr();
     if (!prisma) return;
     await prisma.user.deleteMany({ where: { email } });
     await prisma.$disconnect();
@@ -154,14 +157,38 @@ describe.skipIf(!integrationEnabled)("text path", () => {
     expect(failed.summary).toBeNull();
   });
 
-  it("returns the unsupported extraction error for PDF and image sources", async () => {
+  it("rejects a PDF or image that does not include a file", async () => {
     const api = createApp(services(provider));
-    const pdf = await request(api).post("/notes").send({ source: { kind: "pdf" } }).expect(501);
-    const image = await request(api).post("/notes").send({ source: { kind: "image" } }).expect(501);
-    expect(pdf.body.error.message).toMatch(/PDF extraction is not available yet/);
-    expect(image.body.error.message).toMatch(/Image extraction is not available yet/);
+    const pdf = await request(api).post("/notes").send({ source: { kind: "pdf" } }).expect(400);
+    const image = await request(api).post("/notes").send({ source: { kind: "image" } }).expect(400);
+    expect(pdf.body.error.code).toBe("VALIDATION");
+    expect(pdf.body.error.message).toMatch(/Attach a PDF file/);
+    expect(image.body.error.message).toMatch(/Attach an image/);
     expect(provider.calls).toBe(0);
     expect(await prisma.note.count({ where: { user: { email } } })).toBe(0);
+  });
+
+  it("creates a note from a PDF text layer", async () => {
+    const api = createApp(services(provider));
+    const created = await request(api)
+      .post("/notes")
+      .send({
+        title: "Cells",
+        source: {
+          kind: "pdf",
+          filename: "cells.pdf",
+          data: Buffer.from(textPdf(["Mitochondria produce ATP."])).toString("base64"),
+        },
+      })
+      .expect(201);
+    expect(created.body.title).toBe("Cells");
+    expect(provider.calls).toBe(1);
+    expect(provider.messages[0]?.[1]?.content).toContain("Mitochondria produce ATP.");
+    const stored = await prisma.note.findUniqueOrThrow({
+      where: { id: created.body.id },
+      include: { sourceFiles: true },
+    });
+    expect(stored.sourceFiles[0]).toMatchObject({ kind: "PDF", filename: "cells.pdf" });
   });
 
   it("hides another user's flashcard", async () => {

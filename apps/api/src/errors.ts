@@ -20,15 +20,3 @@ export class GenerationError extends AppError {
     this.name = "GenerationError";
   }
 }
-
-export class UnsupportedExtractionError extends AppError {
-  constructor(kind: "pdf" | "image") {
-    const label = kind === "pdf" ? "PDF" : "Image";
-    super(
-      "UNSUPPORTED_SOURCE",
-      `${label} extraction is not available yet. Create a note from plain text.`,
-      501,
-    );
-    this.name = "UnsupportedExtractionError";
-  }
-}

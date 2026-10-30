@@ -16,9 +16,12 @@
   "dependencies": {
     "@prisma/client": "^6.16.0",
     "@rev/shared": "*",
+    "@tesseract.js-data/eng": "^1.0.0",
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",
     "express": "^4.21.2",
+    "tesseract.js": "^7.0.0",
+    "unpdf": "1.4.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {

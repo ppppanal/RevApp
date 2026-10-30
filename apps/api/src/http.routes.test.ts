@@ -84,28 +84,39 @@ describe("HTTP routes", () => {
     expect(emptyCard.body.error.message).toMatch(/question or an answer/);
   });
 
-  it("passes PDF and image sources through to extraction", async () => {
-    const seen: string[] = [];
+  it("decodes PDF and image files and forwards typed extraction errors", async () => {
+    const seen: CreateNoteCommand[] = [];
     const api = appWith({
       async create(_userId, command) {
-        seen.push(command.source.kind);
-        if (command.source.kind !== "text") {
-          throw new AppError(
-            "UNSUPPORTED_SOURCE",
-            `${command.source.kind === "pdf" ? "PDF" : "Image"} extraction is not available yet. Create a note from plain text.`,
-            501,
-          );
-        }
-        return note;
+        seen.push(command);
+        throw new AppError("EXTRACTION_FAILED", "Could not read text from this PDF.", 422);
       },
     });
 
-    const pdf = await request(api).post("/notes").send({ source: { kind: "pdf", filename: "notes.pdf" } }).expect(501);
-    const image = await request(api).post("/notes").send({ source: { kind: "image", mimeType: "image/png" } }).expect(501);
-    expect(pdf.body.error.code).toBe("UNSUPPORTED_SOURCE");
-    expect(pdf.body.error.message).toMatch(/PDF extraction is not available yet/);
-    expect(image.body.error.message).toMatch(/Image extraction is not available yet/);
-    expect(seen).toEqual(["pdf", "image"]);
+    const missing = await request(api).post("/notes").send({ source: { kind: "pdf", filename: "notes.pdf" } }).expect(400);
+    expect(missing.body.error.code).toBe("VALIDATION");
+    expect(missing.body.error.message).toMatch(/Attach a PDF file/);
+    expect(seen).toHaveLength(0);
+
+    const missingImage = await request(api).post("/notes").send({ source: { kind: "image", mimeType: "image/png" } }).expect(400);
+    expect(missingImage.body.error.message).toMatch(/Attach an image/);
+
+    const pdf = Buffer.from("%PDF-1.4");
+    const failed = await request(api)
+      .post("/notes")
+      .send({ source: { kind: "pdf", filename: "notes.pdf", data: `data:application/pdf;base64,${pdf.toString("base64")}` } })
+      .expect(422);
+    expect(failed.body.error.code).toBe("EXTRACTION_FAILED");
+    expect(seen[0]?.source).toMatchObject({ kind: "pdf", filename: "notes.pdf" });
+    expect(Buffer.from(seen[0]?.source.kind === "pdf" ? seen[0].source.data ?? new Uint8Array() : [])).toEqual(pdf);
+
+    const image = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+    await request(api)
+      .post("/notes")
+      .send({ source: { kind: "image", mimeType: "image/png", data: image.toString("base64") } })
+      .expect(422);
+    expect(seen[1]?.source.kind).toBe("image");
+    expect(Buffer.from(seen[1]?.source.kind === "image" ? seen[1].source.data ?? new Uint8Array() : [])).toEqual(image);
   });
 
   it("rejects a body that is not JSON", async () => {
