@@ -76,7 +76,7 @@ Set `LLM_PROVIDER=fake` in `apps/api/.env` to exercise the app without calling a
 npm test
 ```
 
-The HTTP integration test needs `REV_TEST_DATABASE_URL` pointing at a second Postgres database (another Neon database is fine). Prisma migrations also read `DIRECT_URL`; for that test database, set `DIRECT_URL` to the same URL when you are not using a pooler.
+The HTTP integration test needs `REV_TEST_DATABASE_URL` pointing at a second Postgres database (another Neon database is fine). The test runs Prisma migrations against that URL.
 
 ```bash
 REV_TEST_DATABASE_URL=postgresql://USER:PASSWORD@HOST/revapp_test?sslmode=require npm run test:integration -w @rev/api
