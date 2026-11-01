@@ -220,11 +220,58 @@ def render_quiz(user: dict, note: dict) -> None:
 def note_label(note: dict) -> str:
     subject = note.get("subjectName")
     title = note.get("title") or "Untitled note"
-    return f"{title} · {subject}" if subject else title
+    label = f"{title} · {subject}" if subject else title
+    count = note.get("flashcardCount")
+    if isinstance(count, int):
+        label = f"{label} · {count} cards"
+    return label
+
+
+def render_page_buttons() -> str:
+    page = st.session_state.get("page") or "upload"
+    upload_col, cards_col = st.columns(2)
+    with upload_col:
+        if st.button("上傳", type="primary" if page == "upload" else "secondary", use_container_width=True):
+            if page != "upload":
+                st.session_state["page"] = "upload"
+                st.session_state.pop("quiz", None)
+                st.rerun()
+    with cards_col:
+        if st.button("開啟卡片", type="primary" if page == "cards" else "secondary", use_container_width=True):
+            if page != "cards":
+                st.session_state["page"] = "cards"
+                st.session_state.pop("quiz", None)
+                st.rerun()
+    return st.session_state.get("page") or "upload"
+
+
+def render_result(user: dict, note: dict) -> None:
+    quiz = st.session_state.get("quiz")
+    if quiz and quiz.get("noteId") != note.get("id"):
+        st.session_state.pop("quiz", None)
+        quiz = None
+    if quiz:
+        render_quiz(user, note)
+        return
+    render_note(note)
+    if note.get("flashcards") and st.button("Quiz", type="primary", key=f"start-quiz-{note['id']}"):
+        begin_quiz(user, note)
+    quote = st.text_area("Quote", placeholder="Paste a passage from the source.", key=f"quote-{note['id']}")
+    if st.button("Make revision card", key=f"quote-button-{note['id']}"):
+        try:
+            updated = call(
+                {"action": "quote", "userId": user["id"], "noteId": note["id"], "quote": quote},
+                needs_model=True,
+            )
+        except StudyError as error:
+            st.error(str(error))
+        else:
+            st.session_state["note"] = updated
+            st.rerun()
 
 
 def render_upload(user: dict, home: dict) -> None:
-    st.markdown("**上傳**")
+    st.caption("PDF、image，或貼上 text。")
     title = st.text_input("Title", placeholder="Optional")
     subjects = home.get("subjects") or []
     subject_choice = st.selectbox("Subject", ["None", *subjects, "New subject"])
@@ -275,7 +322,9 @@ def render_upload(user: dict, home: dict) -> None:
             st.error(str(error))
             return
         st.session_state["note"] = created
+        st.session_state["note-from"] = "upload"
         st.session_state["pending-note"] = created["id"]
+        st.session_state["page"] = "upload"
         st.session_state.pop("quiz", None)
         st.rerun()
 
@@ -292,16 +341,14 @@ def main() -> None:
         if st.button("Log out"):
             st.session_state.pop("user", None)
             st.session_state.pop("note", None)
+            st.session_state.pop("note-from", None)
             st.session_state.pop("selected-note", None)
+            st.session_state.pop("pending-note", None)
+            st.session_state.pop("page", None)
             st.session_state.pop("quiz", None)
             st.rerun()
     render_howto()
-
-    langs = installed_tesseract_languages()
-    if not missing_ocr_languages(langs):
-        st.caption("Image OCR uses Tesseract for English, Simplified Chinese, and Japanese.")
-    else:
-        st.caption("Image OCR uses the existing extractor. Scanned PDFs are not supported.")
+    page = render_page_buttons()
 
     try:
         home = call({"action": "home", "userId": user["id"]}, needs_model=False)
@@ -309,66 +356,50 @@ def main() -> None:
         st.error(str(error))
         return
 
-    upload_slot = st.container()
-    result_slot = st.container()
-    library_slot = st.container()
-
     notes = home.get("notes") or []
     labels = {item["id"]: note_label(item) for item in notes}
-    with library_slot:
-        st.caption("開啟之前的 note")
+    note = st.session_state.get("note")
+    if note and note.get("id") not in labels:
+        note = None
+        st.session_state.pop("note", None)
+    quizzing = bool(note) and (st.session_state.get("quiz") or {}).get("noteId") == note.get("id")
+
+    if page == "cards":
         pending = st.session_state.pop("pending-note", None)
         if pending in labels:
             st.session_state["selected-note"] = pending
-        if st.session_state.get("selected-note") not in labels and st.session_state.get("selected-note") != "":
-            st.session_state["selected-note"] = ""
-        selected = st.selectbox(
-            "Saved notes",
-            ["", *labels.keys()],
-            format_func=lambda note_id: "Choose a note" if note_id == "" else labels.get(note_id, note_id),
+        if st.session_state.get("selected-note") not in labels:
+            st.session_state["selected-note"] = next(iter(labels), "")
+        if not labels:
+            st.info("還沒有儲存的 note。先按「上傳」。")
+            return
+        selected = st.radio(
+            "開啟之前的 note",
+            list(labels),
+            format_func=lambda note_id: labels.get(note_id, note_id),
             key="selected-note",
         )
-
-    note = st.session_state.get("note")
-    if selected and (not note or note.get("id") != selected):
-        try:
-            note = call({"action": "get", "userId": user["id"], "noteId": selected}, needs_model=False)
-        except StudyError as error:
-            st.error(str(error))
-        else:
+        if selected and (not note or note.get("id") != selected):
+            try:
+                note = call({"action": "get", "userId": user["id"], "noteId": selected}, needs_model=False)
+            except StudyError as error:
+                st.error(str(error))
+                return
             st.session_state["note"] = note
-    elif note and note.get("id") not in labels:
-        note = None
-        st.session_state.pop("note", None)
+        if note:
+            st.session_state["note-from"] = "cards"
+            render_result(user, note)
+        return
 
-    quiz = st.session_state.get("quiz")
-    if quiz and quiz.get("noteId") != (note or {}).get("id"):
-        st.session_state.pop("quiz", None)
-        quiz = None
-
-    with upload_slot:
-        if not quiz:
-            render_upload(user, home)
-
-    with result_slot:
-        if note and quiz:
-            render_quiz(user, note)
-        elif note:
-            render_note(note)
-            if note.get("flashcards") and st.button("Quiz", type="primary", key=f"start-quiz-{note['id']}"):
-                begin_quiz(user, note)
-            quote = st.text_area("Quote", placeholder="Paste a passage from the source.", key=f"quote-{note['id']}")
-            if st.button("Make revision card", key=f"quote-button-{note['id']}"):
-                try:
-                    updated = call(
-                        {"action": "quote", "userId": user["id"], "noteId": note["id"], "quote": quote},
-                        needs_model=True,
-                    )
-                except StudyError as error:
-                    st.error(str(error))
-                else:
-                    st.session_state["note"] = updated
-                    st.rerun()
+    if not (quizzing and st.session_state.get("note-from") == "upload"):
+        langs = installed_tesseract_languages()
+        if not missing_ocr_languages(langs):
+            st.caption("Image OCR uses Tesseract for English, Simplified Chinese, and Japanese.")
+        else:
+            st.caption("Image OCR uses the existing extractor. Scanned PDFs are not supported.")
+        render_upload(user, home)
+    if note and st.session_state.get("note-from") == "upload":
+        render_result(user, note)
 
 
 main()
