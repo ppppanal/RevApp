@@ -1,8 +1,23 @@
 import { config as loadEnv } from "dotenv";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { z } from "zod";
 import { AppError } from "./errors";
 import { parseStudyCliInput } from "./study-input";
+
+const userIdSchema = z.string().trim().min(1).max(80);
+const accountSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("register"), login: z.string(), password: z.string() }).strict(),
+  z.object({ action: z.literal("login"), login: z.string(), password: z.string() }).strict(),
+  z.object({ action: z.literal("home"), userId: userIdSchema }).strict(),
+  z.object({ action: z.literal("get"), userId: userIdSchema, noteId: z.string().trim().min(1) }).strict(),
+  z.object({
+    action: z.literal("quote"),
+    userId: userIdSchema,
+    noteId: z.string().trim().min(1),
+    quote: z.string(),
+  }).strict(),
+]);
 
 const apiRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 loadEnv({ path: resolve(apiRoot, ".env") });
@@ -44,7 +59,10 @@ async function main(): Promise<void> {
   } catch {
     throw new AppError("VALIDATION", "The study request was not valid JSON.", 400);
   }
-  const prepared = parseStudyCliInput(payload);
+  const actionName =
+    payload && typeof payload === "object" && "action" in payload && typeof payload.action === "string"
+      ? payload.action
+      : "create";
 
   const { loadConfig, assertServerConfig } = await import("./config");
   const { prisma } = await import("./db");
@@ -53,11 +71,12 @@ async function main(): Promise<void> {
   const { FixtureLlmProvider } = await import("./llm/fixture-provider");
   const { StudyGenerationService } = await import("./services/generation-service");
   const { NoteService } = await import("./services/note-service");
-  const { resolveDevUser } = await import("./services/dev-user");
+  const { AccountService } = await import("./services/account-service");
 
   try {
     const config = loadConfig();
-    assertServerConfig(config);
+    const needsModel = actionName === "create" || actionName === "quote";
+    if (needsModel) assertServerConfig(config);
     const provider =
       config.llm.provider === "fake"
         ? new FixtureLlmProvider()
@@ -73,12 +92,30 @@ async function main(): Promise<void> {
       new StudyGenerationService(provider, config.llm.timeoutMs),
       null,
     );
-    const user = await resolveDevUser(prisma, config.devUserEmail);
-    const note = await notes.create(user.id, prepared.command, {
-      storeFiles: false,
-      extractedText: prepared.extractedText,
-    });
-    process.stdout.write(`${JSON.stringify(note)}\n`);
+    const accounts = new AccountService(prisma);
+    let result: unknown;
+    if (actionName === "create") {
+      const prepared = parseStudyCliInput(payload);
+      if (!prepared.userId) throw new AppError("VALIDATION", "Sign in before saving a note.", 400);
+      result = await notes.create(prepared.userId, prepared.command, {
+        storeFiles: false,
+        extractedText: prepared.extractedText,
+      });
+    } else {
+      const parsed = accountSchema.safeParse(payload);
+      if (!parsed.success) {
+        throw new AppError("VALIDATION", parsed.error.issues[0]?.message ?? "The study request is invalid.", 400);
+      }
+      const action = parsed.data;
+      if (action.action === "register") result = await accounts.register(action.login, action.password);
+      else if (action.action === "login") result = await accounts.authenticate(action.login, action.password);
+      else if (action.action === "home") {
+        const labels = await accounts.labels(action.userId);
+        result = { notes: await notes.list(action.userId), ...labels };
+      } else if (action.action === "get") result = await notes.get(action.userId, action.noteId);
+      else result = await notes.addQuoteCard(action.userId, action.noteId, action.quote);
+    }
+    process.stdout.write(`${JSON.stringify(result)}\n`);
   } finally {
     const { shutdownImageOcr } = await import("./extraction/image-ocr");
     await shutdownImageOcr().catch(() => undefined);

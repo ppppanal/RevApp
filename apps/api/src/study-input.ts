@@ -32,8 +32,11 @@ const imageSource = z
 
 export const studyCliInputSchema = z
   .object({
+    action: z.literal("create").optional(),
+    userId: z.string().trim().min(1).max(80).optional(),
     title: label.optional(),
     subjectName: z.string().trim().min(1).max(80).optional(),
+    tags: z.array(z.string()).max(20).optional(),
     extractedText: z.string().optional(),
     source: z.discriminatedUnion("kind", [textSource, pdfSource, imageSource]),
   })
@@ -42,6 +45,7 @@ export const studyCliInputSchema = z
 export type StudyCliInput = z.infer<typeof studyCliInputSchema>;
 
 export interface PreparedStudy {
+  userId?: string;
   command: CreateNoteCommand;
   extractedText?: string;
 }
@@ -58,8 +62,10 @@ export function parseStudyCliInput(value: unknown): PreparedStudy {
 function toPreparedStudy(input: StudyCliInput): PreparedStudy {
   const title = input.title;
   const subjectName = input.subjectName;
+  const tagNames = input.tags;
+  const userId = input.userId;
   if (input.source.kind === "text") {
-    return { command: { title, subjectName, source: { kind: "text", text: input.source.text } } };
+    return { userId, command: { title, subjectName, tagNames, source: { kind: "text", text: input.source.text } } };
   }
 
   const extractedText = input.extractedText;
@@ -79,14 +85,17 @@ function toPreparedStudy(input: StudyCliInput): PreparedStudy {
 
   if (input.source.kind === "pdf") {
     return {
-      command: { title, subjectName, source: { kind: "pdf", filename: input.source.filename, data: bytes } },
+      userId,
+      command: { title, subjectName, tagNames, source: { kind: "pdf", filename: input.source.filename, data: bytes } },
       extractedText,
     };
   }
   return {
+    userId,
     command: {
       title,
       subjectName,
+      tagNames,
       source: { kind: "image", filename: input.source.filename, mimeType: input.source.mimeType, data: bytes },
     },
     extractedText,

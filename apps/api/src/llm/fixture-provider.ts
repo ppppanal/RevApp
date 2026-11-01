@@ -3,6 +3,13 @@ import type { ChatMessage, LlmCompletionOptions, LlmProvider } from "./provider"
 export class FixtureLlmProvider implements LlmProvider {
   async complete(messages: ChatMessage[], _options: LlmCompletionOptions): Promise<string> {
     const notes = messages.find((message) => message.role === "user")?.content ?? "";
+    if (notes.startsWith("Quote:")) {
+      const quote = notes.replace(/^Quote:\n?/, "").trim().slice(0, 4_000);
+      return JSON.stringify({
+        question: "What does the quoted passage say?",
+        answer: quote || "The passage is empty.",
+      });
+    }
     const snippet = notes.replace(/^Notes:\n?/, "").trim().slice(0, 180);
     const idea = snippet.length > 0 ? snippet : "Review these notes.";
     return JSON.stringify({

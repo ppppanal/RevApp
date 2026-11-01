@@ -56,14 +56,22 @@ def build_study_payload(
     data: bytes | None = None,
     title: str = "",
     subject_name: str = "",
+    tags: list[str] | None = None,
+    user_id: str = "",
     installed_langs: set[str] | None = None,
     ocr=None,
 ) -> dict:
     payload: dict = {}
+    if user_id:
+        payload["action"] = "create"
+        payload["userId"] = user_id
     if title.strip():
         payload["title"] = title.strip()
     if subject_name.strip():
         payload["subjectName"] = subject_name.strip()
+    clean_tags = [tag.strip() for tag in (tags or []) if tag.strip()]
+    if clean_tags:
+        payload["tags"] = clean_tags
     if data is None:
         notes = text.strip()
         if not notes:

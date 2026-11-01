@@ -112,6 +112,7 @@ export interface Flashcard {
   answer: string;
   position: number;
   edited: boolean;
+  personal: boolean;
 }
 
 export interface NoteResponse {
@@ -120,6 +121,8 @@ export interface NoteResponse {
   status: NoteStatus;
   summary: string | null;
   subjectName: string | null;
+  tags: string[];
+  sourceText: string;
   keyPoints: KeyPoint[];
   flashcards: Flashcard[];
   createdAt: string;
@@ -132,6 +135,7 @@ export interface NoteSummary {
   status: NoteStatus;
   summary: string | null;
   subjectName: string | null;
+  tags: string[];
   flashcardCount: number;
   createdAt: string;
   updatedAt: string;

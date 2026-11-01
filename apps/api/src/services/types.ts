@@ -4,6 +4,7 @@ import type { ExtractionSource } from "../extraction/extractors";
 export interface CreateNoteCommand {
   title?: string;
   subjectName?: string;
+  tagNames?: string[];
   source: ExtractionSource;
 }
 

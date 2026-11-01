@@ -72,17 +72,20 @@ Set `LLM_PROVIDER=fake` in `apps/api/.env` to exercise the app without calling a
 
 ## Streamlit
 
-The Expo app stays the main client. `apps/streamlit/app.py` is a separate one-page client: paste text or upload a PDF or image, then it calls the existing study command (`apps/api/src/study-cli.ts`). That command uses Gemini (`LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`) and saves the note in Neon (`DATABASE_URL`). It does not upload the file to R2. Scanned PDFs are still rejected.
+The Expo app stays the main client. `apps/streamlit/app.py` is a separate one-page client: register or log in, paste text or upload a PDF or image, pick or create a subject and tags, then it calls the existing study command (`apps/api/src/study-cli.ts`). That command uses Gemini (`LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`) and saves the note in Neon (`DATABASE_URL`). It does not upload the file to R2. Scanned PDFs are still rejected.
+
+Each account is an email or username plus a password. The password is stored hashed on the user row. A person only sees notes, subjects, and tags saved on that account. After a note exists, paste a passage from its source to add one revision card built from that quote only.
 
 Image OCR uses Tesseract in this process for English, Simplified Chinese, and Japanese when `eng`, `chi_sim`, and `jpn` are installed. The repo root `packages.txt` asks Streamlit Community Cloud to apt-install those packs. If any of them is missing, the page sends the image to the existing API extractor instead.
 
-Python dependencies are `apps/streamlit/requirements.txt`. Open the page with:
+Python dependencies are `apps/streamlit/requirements.txt`. Apply the login migration, then open the page:
 
 ```bash
-APP_PASSWORD=choose-a-password streamlit run apps/streamlit/app.py
+npm run db:migrate -w @rev/api
+streamlit run apps/streamlit/app.py
 ```
 
-The study command reads `apps/api/.env` for `DATABASE_URL` and the Gemini settings. `APP_PASSWORD` is the page gate. Do not commit either file.
+The study command reads `apps/api/.env` for `DATABASE_URL` and the Gemini settings. Do not commit that file.
 
 ### Streamlit Community Cloud
 
@@ -96,15 +99,15 @@ Do not buy a domain. Leave the app URL blank so Community Cloud assigns a free `
 6. Click **Advanced settings**. Choose Python **3.12**. In **Secrets**, paste:
 
 ```toml
-APP_PASSWORD = "choose-a-password"
 DATABASE_URL = "postgresql://USER:PASSWORD@HOST/neondb?sslmode=require&pgbouncer=true"
 LLM_PROVIDER = "openai"
 LLM_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
 LLM_API_KEY = "your-gemini-key"
 LLM_MODEL = "gemini-3.8-flash"
 LLM_JSON_MODE = "object"
-DEV_USER_EMAIL = "dev@localhost"
 ```
+
+Run `npm run db:migrate -w @rev/api` against that database before the first registration. Accounts are created on the page.
 
 7. Click **Save**, then click **Deploy**.
 

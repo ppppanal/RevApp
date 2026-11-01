@@ -9,14 +9,16 @@ datasource db {
 }
 
 model User {
-  id        String    @id @default(cuid())
-  email     String    @unique
-  name      String?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  subjects  Subject[]
-  notes     Note[]
-  tags      Tag[]
+  id           String    @id @default(cuid())
+  email        String?   @unique
+  username     String?   @unique
+  passwordHash String?
+  name         String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  subjects     Subject[]
+  notes        Note[]
+  tags         Tag[]
 }
 
 model Subject {
@@ -91,6 +93,7 @@ model Flashcard {
   answer    String
   position  Int
   edited    Boolean  @default(false)
+  personal  Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

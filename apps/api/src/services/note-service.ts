@@ -6,13 +6,16 @@ import type { TextExtractor } from "../extraction/extractors";
 import { imageContentType, sourceObjectKey } from "../storage/object-key";
 import type { ObjectStore } from "../storage/object-store";
 import { cleanNoteText, deriveTitle, stripNullBytes } from "../text/clean-text";
+import { quoteIsInSource } from "../text/quote";
+import { normalizeTagNames } from "../text/tags";
 import type { StudyGenerationService } from "./generation-service";
 import type { CreateNoteCommand, CreateNoteOptions, NoteApi } from "./types";
 
 const noteInclude = {
   subject: true,
-  keyPoints: { orderBy: { position: "asc" } },
-  flashcards: { orderBy: { position: "asc" } },
+  tags: { orderBy: { name: "asc" as const } },
+  keyPoints: { orderBy: { position: "asc" as const } },
+  flashcards: { orderBy: { position: "asc" as const } },
 } as const;
 
 type NoteRecord = Prisma.NoteGetPayload<{ include: typeof noteInclude }>;
@@ -61,6 +64,7 @@ export class NoteService implements NoteApi {
           create: { userId, name: command.subjectName },
         })
       : null;
+    const tagNames = normalizeTagNames(command.tagNames);
 
     const note = await this.prisma.note.create({
       data: {
@@ -70,6 +74,16 @@ export class NoteService implements NoteApi {
         status: "PROCESSING",
         userId,
         subjectId: subject?.id,
+        ...(tagNames.length > 0
+          ? {
+              tags: {
+                connectOrCreate: tagNames.map((name) => ({
+                  where: { userId_name: { userId, name } },
+                  create: { userId, name },
+                })),
+              },
+            }
+          : {}),
         sourceFiles: {
           create: {
             ...(stored?.id ? { id: stored.id } : {}),
@@ -131,6 +145,7 @@ export class NoteService implements NoteApi {
       orderBy: { createdAt: "desc" },
       include: {
         subject: true,
+        tags: { orderBy: { name: "asc" } },
         _count: { select: { flashcards: true } },
       },
     });
@@ -140,10 +155,47 @@ export class NoteService implements NoteApi {
       status: note.status,
       summary: note.summary,
       subjectName: note.subject?.name ?? null,
+      tags: note.tags.map((tag) => tag.name),
       flashcardCount: note._count.flashcards,
       createdAt: note.createdAt.toISOString(),
       updatedAt: note.updatedAt.toISOString(),
     }));
+  }
+
+  async addQuoteCard(userId: string, noteId: string, quote: string): Promise<NoteResponse> {
+    const passage = quote.trim();
+    if (passage.length < 3 || passage.length > 2_000) {
+      throw new AppError("VALIDATION", "Paste a passage from this note.", 400);
+    }
+    const note = await this.prisma.note.findFirst({
+      where: { id: noteId, userId },
+      select: {
+        cleanedText: true,
+        rawText: true,
+        sourceFiles: { select: { extractedText: true } },
+      },
+    });
+    if (!note) throw new AppError("NOT_FOUND", "Note not found.", 404);
+    const sources = [note.cleanedText, note.rawText, ...note.sourceFiles.map((file) => file.extractedText)];
+    if (!quoteIsInSource(passage, sources)) {
+      throw new AppError("VALIDATION", "Paste a passage that appears in this note.", 400);
+    }
+    const card = await this.generation.generateQuoteCard(passage);
+    const last = await this.prisma.flashcard.findFirst({
+      where: { noteId },
+      orderBy: { position: "desc" },
+      select: { position: true },
+    });
+    await this.prisma.flashcard.create({
+      data: {
+        noteId,
+        question: card.question,
+        answer: card.answer,
+        position: (last?.position ?? -1) + 1,
+        personal: true,
+      },
+    });
+    return this.get(userId, noteId);
   }
 
   async get(userId: string, noteId: string): Promise<NoteResponse> {
@@ -192,6 +244,8 @@ function toNoteResponse(note: NoteRecord): NoteResponse {
     status: note.status,
     summary: note.summary,
     subjectName: note.subject?.name ?? null,
+    tags: note.tags.map((tag) => tag.name),
+    sourceText: note.cleanedText,
     keyPoints: note.keyPoints.map((point) => ({
       id: point.id,
       kind: point.kind,
@@ -204,6 +258,7 @@ function toNoteResponse(note: NoteRecord): NoteResponse {
       answer: card.answer,
       position: card.position,
       edited: card.edited,
+      personal: card.personal,
     })),
     createdAt: note.createdAt.toISOString(),
     updatedAt: note.updatedAt.toISOString(),

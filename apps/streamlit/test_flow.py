@@ -9,8 +9,15 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(missing_ocr_languages({"eng", "chi_sim", "jpn", "osd"}), [])
 
     def test_text_payload(self) -> None:
-        payload = build_study_payload(text="Mitochondria produce ATP.", title="  Cells  ")
+        payload = build_study_payload(
+            text="Mitochondria produce ATP.",
+            title="  Cells  ",
+            user_id="user_1",
+            tags=["ATP", " cells "],
+        )
         self.assertEqual(payload["title"], "Cells")
+        self.assertEqual(payload["userId"], "user_1")
+        self.assertEqual(payload["tags"], ["ATP", "cells"])
         self.assertEqual(payload["source"], {"kind": "text", "text": "Mitochondria produce ATP."})
 
     def test_image_uses_in_process_ocr_when_languages_exist(self) -> None:

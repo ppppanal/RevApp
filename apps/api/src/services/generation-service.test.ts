@@ -58,6 +58,17 @@ describe("StudyGenerationService", () => {
     expect(invalid.calls).toBe(2);
   });
 
+  it("asks for one card from the quote and not the rest of the note", async () => {
+    const provider = new ScriptedProvider([
+      JSON.stringify({ question: "What does the passage say?", answer: "Mitochondria produce ATP." }),
+    ]);
+    const card = await new StudyGenerationService(provider, 1000).generateQuoteCard("Mitochondria produce ATP.");
+    expect(card).toEqual({ question: "What does the passage say?", answer: "Mitochondria produce ATP." });
+    expect(provider.messages[0]?.[1]?.content).toBe("Quote:\nMitochondria produce ATP.");
+    expect(provider.messages[0]?.[1]?.content).not.toContain("energy currency");
+    expect(provider.messages[0]?.[0]?.content).toMatch(/exactly one flashcard/);
+  });
+
   it("does not retry a provider error", async () => {
     const provider = new ScriptedProvider([new GenerationError("PROVIDER_ERROR", "The model request failed.")]);
     await expect(new StudyGenerationService(provider, 1000).generate("notes")).rejects.toMatchObject({

@@ -5,8 +5,6 @@ Main file: apps/streamlit/app.py
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import os
 import sys
 from pathlib import Path
@@ -23,24 +21,6 @@ from flow import StudyError, build_study_payload, installed_tesseract_languages,
 st.set_page_config(page_title="Rev", layout="centered")
 
 
-def setting(name: str) -> str:
-    value = os.environ.get(name, "").strip()
-    if value:
-        return value
-    try:
-        secret = st.secrets.get(name, "")
-    except Exception:
-        return ""
-    return str(secret).strip() if secret is not None else ""
-
-
-def passwords_match(given: str, expected: str) -> bool:
-    return hmac.compare_digest(
-        hashlib.sha256(given.encode("utf-8")).digest(),
-        hashlib.sha256(expected.encode("utf-8")).digest(),
-    )
-
-
 def child_env() -> dict[str, str]:
     env = dict(os.environ)
     try:
@@ -52,39 +32,35 @@ def child_env() -> dict[str, str]:
     return env
 
 
-def require_password() -> None:
-    expected = setting("APP_PASSWORD")
-    if not expected:
-        st.title("Rev")
-        st.error("Set APP_PASSWORD before using this page.")
-        st.stop()
-    if st.session_state.get("authenticated"):
-        return
-    st.title("Rev")
-    st.caption("Turn notes, a PDF, or a photo into a summary, key points, and flashcards.")
-    with st.form("password-gate"):
-        entered = st.text_input("Password", type="password")
-        submitted = st.form_submit_button("Continue")
-    if submitted:
-        if passwords_match(entered, expected):
-            st.session_state["authenticated"] = True
-            st.rerun()
-        st.error("Wrong password.")
-    st.stop()
-
-
-def missing_runtime_settings(env: dict[str, str]) -> list[str]:
+def missing_runtime_settings(env: dict[str, str], *, needs_model: bool) -> list[str]:
     missing = []
     if not env.get("DATABASE_URL", "").strip():
         missing.append("DATABASE_URL")
-    provider = env.get("LLM_PROVIDER", "openai").strip() or "openai"
-    if provider != "fake" and not env.get("LLM_API_KEY", "").strip():
-        missing.append("LLM_API_KEY")
+    if needs_model:
+        provider = env.get("LLM_PROVIDER", "openai").strip() or "openai"
+        if provider != "fake" and not env.get("LLM_API_KEY", "").strip():
+            missing.append("LLM_API_KEY")
     return missing
+
+
+def call(payload: dict, *, needs_model: bool) -> dict:
+    env = child_env()
+    missing = missing_runtime_settings(env, needs_model=needs_model)
+    if missing:
+        raise StudyError("Set " + ", ".join(missing) + " and try again.")
+    return run_study(payload, repo_root=REPO_ROOT, env=env)
 
 
 def render_note(note: dict) -> None:
     st.subheader(note.get("title") or "Study pack")
+    details = []
+    if note.get("subjectName"):
+        details.append(f"Subject: {note['subjectName']}")
+    tags = note.get("tags") or []
+    if tags:
+        details.append("Tags: " + ", ".join(tags))
+    if details:
+        st.caption(" · ".join(details))
     summary = note.get("summary")
     if summary:
         st.write(summary)
@@ -97,30 +73,129 @@ def render_note(note: dict) -> None:
     if cards:
         st.markdown("**Flashcards**")
         for card in cards:
-            with st.expander(card.get("question") or "Card"):
+            label = card.get("question") or "Card"
+            if card.get("personal"):
+                label = f"Revision card: {label}"
+            with st.expander(label):
                 st.write(card.get("answer") or "")
-    note_id = note.get("id")
-    if note_id:
-        st.caption(f"Saved to Neon as {note_id}.")
+    source = note.get("sourceText") or ""
+    if source:
+        st.markdown("**Source**")
+        st.caption("Select a passage here, copy it, and paste it below.")
+        st.text_area("Source text", value=source, height=160, disabled=True, label_visibility="collapsed")
+
+
+def account_gate() -> dict | None:
+    if st.session_state.get("user"):
+        return st.session_state["user"]
+    st.title("Rev")
+    st.caption("Create an account or log in. Each person only sees their own notes.")
+    mode = st.radio("Account", ["Log in", "Register"], horizontal=True)
+    with st.form("account"):
+        login = st.text_input("Email or username")
+        password = st.text_input("Password", type="password")
+        confirm = st.text_input("Confirm password", type="password") if mode == "Register" else ""
+        submitted = st.form_submit_button(mode)
+    if submitted:
+        if mode == "Register" and password != confirm:
+            st.error("Those passwords do not match.")
+            st.stop()
+        try:
+            user = call(
+                {"action": "register" if mode == "Register" else "login", "login": login, "password": password},
+                needs_model=False,
+            )
+        except StudyError as error:
+            st.error(str(error))
+            st.stop()
+        st.session_state["user"] = user
+        st.rerun()
+    st.stop()
+    return None
+
+
+def note_label(note: dict) -> str:
+    subject = note.get("subjectName")
+    title = note.get("title") or "Untitled note"
+    return f"{title} · {subject}" if subject else title
 
 
 def main() -> None:
-    require_password()
+    user = account_gate()
+    if user is None:
+        return
     st.title("Rev")
-    st.caption("Paste text or upload a PDF or image. Generation uses the existing study command.")
+    st.caption(f"Signed in as {user.get('login', 'you')}.")
+    if st.button("Log out"):
+        st.session_state.pop("user", None)
+        st.session_state.pop("note", None)
+        st.session_state.pop("selected-note", None)
+        st.rerun()
+
     langs = installed_tesseract_languages()
-    missing = missing_ocr_languages(langs)
-    if not missing:
+    if not missing_ocr_languages(langs):
         st.caption("Image OCR uses Tesseract for English, Simplified Chinese, and Japanese.")
     else:
         st.caption("Image OCR uses the existing extractor. Scanned PDFs are not supported.")
 
-    if st.button("Lock", key="lock"):
-        st.session_state["authenticated"] = False
-        st.rerun()
+    try:
+        home = call({"action": "home", "userId": user["id"]}, needs_model=False)
+    except StudyError as error:
+        st.error(str(error))
+        return
 
+    notes = home.get("notes") or []
+    labels = {item["id"]: note_label(item) for item in notes}
+    pending = st.session_state.pop("pending-note", None)
+    if pending in labels:
+        st.session_state["selected-note"] = pending
+    if st.session_state.get("selected-note") not in labels and st.session_state.get("selected-note") != "":
+        st.session_state["selected-note"] = ""
+    selected = st.selectbox(
+        "Your notes",
+        ["", *labels.keys()],
+        format_func=lambda note_id: "Choose a note" if note_id == "" else labels.get(note_id, note_id),
+        key="selected-note",
+    )
+    note = st.session_state.get("note")
+    if selected and (not note or note.get("id") != selected):
+        try:
+            note = call({"action": "get", "userId": user["id"], "noteId": selected}, needs_model=False)
+        except StudyError as error:
+            st.error(str(error))
+            note = None
+        else:
+            st.session_state["note"] = note
+    elif not selected:
+        note = None
+
+    if note:
+        render_note(note)
+        quote = st.text_area("Quote", placeholder="Paste a passage from the source.", key=f"quote-{note['id']}")
+        if st.button("Make revision card", key=f"quote-button-{note['id']}"):
+            try:
+                updated = call(
+                    {"action": "quote", "userId": user["id"], "noteId": note["id"], "quote": quote},
+                    needs_model=True,
+                )
+            except StudyError as error:
+                st.error(str(error))
+            else:
+                st.session_state["note"] = updated
+                st.rerun()
+
+    st.divider()
+    st.markdown("**New note**")
     title = st.text_input("Title", placeholder="Optional")
-    subject = st.text_input("Subject", placeholder="Optional")
+    subjects = home.get("subjects") or []
+    subject_choice = st.selectbox("Subject", ["None", *subjects, "New subject"])
+    subject_name = ""
+    if subject_choice == "New subject":
+        subject_name = st.text_input("New subject")
+    elif subject_choice != "None":
+        subject_name = subject_choice
+    picked = st.multiselect("Tags", home.get("tags") or [])
+    extra_tags = st.text_input("New tags", placeholder="Comma separated")
     source = st.radio("Input", ["Text", "PDF or image"], horizontal=True)
     text = ""
     upload = None
@@ -134,29 +209,35 @@ def main() -> None:
         )
 
     if st.button("Create study pack", type="primary"):
-        env = child_env()
-        missing_settings = missing_runtime_settings(env)
-        if missing_settings:
-            st.error("Set " + ", ".join(missing_settings) + " and try again.")
-            return
+        tags = list(picked)
+        tags.extend(part.strip() for part in extra_tags.split(",") if part.strip())
         try:
             if upload is None:
-                payload = build_study_payload(text=text, title=title, subject_name=subject)
+                payload = build_study_payload(
+                    text=text,
+                    title=title,
+                    subject_name=subject_name,
+                    tags=tags,
+                    user_id=user["id"],
+                )
             else:
-                data = upload.getvalue()
                 payload = build_study_payload(
                     filename=upload.name,
                     mime_type=upload.type,
-                    data=data,
+                    data=upload.getvalue(),
                     title=title,
-                    subject_name=subject,
+                    subject_name=subject_name,
+                    tags=tags,
+                    user_id=user["id"],
                 )
             with st.spinner("Creating the study pack…"):
-                note = run_study(payload, repo_root=REPO_ROOT, env=env)
+                created = call(payload, needs_model=True)
         except StudyError as error:
             st.error(str(error))
             return
-        render_note(note)
+        st.session_state["note"] = created
+        st.session_state["pending-note"] = created["id"]
+        st.rerun()
 
 
 main()
