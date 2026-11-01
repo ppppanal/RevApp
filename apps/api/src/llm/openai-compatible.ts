@@ -1,5 +1,6 @@
 import { GenerationError } from "../errors";
 import type { ChatMessage, LlmCompletionOptions, LlmProvider } from "./provider";
+import { isGoogleGenerativeLanguage, studyChatTarget } from "./study-target";
 
 export interface OpenAiCompatibleOptions {
   baseUrl: string;
@@ -17,13 +18,23 @@ export class OpenAiCompatibleProvider implements LlmProvider {
     const timeout = setTimeout(() => controller.abort(), options.timeoutMs);
     try {
       const fetchImpl = this.options.fetchImpl ?? fetch;
-      const response = await fetchImpl(chatCompletionsUrl(this.options.baseUrl), {
+      const target = studyChatTarget(this.options.baseUrl, this.options.model);
+      const url = chatCompletionsUrl(target.baseUrl);
+      if (isGoogleGenerativeLanguage(url)) {
+        throw new GenerationError("PROVIDER_ERROR", "The study call does not use the Google Generative Language API.");
+      }
+      const response = await fetchImpl(url, {
         method: "POST",
         headers: {
           "content-type": "application/json",
           authorization: `Bearer ${this.options.apiKey}`,
         },
-        body: JSON.stringify(this.requestBody(messages)),
+        body: JSON.stringify(
+          prepareChatRequest(
+            { baseUrl: target.baseUrl, model: target.model, jsonMode: this.options.jsonMode },
+            messages,
+          ),
+        ),
         signal: controller.signal,
       });
 
@@ -52,12 +63,6 @@ export class OpenAiCompatibleProvider implements LlmProvider {
     }
   }
 
-  private requestBody(messages: ChatMessage[]): Record<string, unknown> {
-    return prepareChatRequest(
-      { baseUrl: this.options.baseUrl, model: this.options.model, jsonMode: this.options.jsonMode },
-      messages,
-    );
-  }
 }
 
 export function prepareChatRequest(
@@ -65,9 +70,7 @@ export function prepareChatRequest(
   messages: ChatMessage[],
 ): Record<string, unknown> {
   if (usesPlainPrompt(options)) {
-    // Gemma on OpenRouter returns 400 for a system role, for response_format when the
-    // host turns it into a strict json_schema, and for max_tokens on this model family.
-    // A user message alone is the request shape the free endpoint accepts.
+    // The free Gemma model is called with one user message. The Google host is never used.
     return {
       model: options.model,
       messages: foldSystemIntoUser(messages),
@@ -94,9 +97,13 @@ function providerErrorMessage(status: number, body: string, secret: string): str
 
 function providerErrorText(body: string): string {
   try {
-    const parsed = JSON.parse(body) as { error?: { message?: unknown; metadata?: { raw?: unknown } } };
-    const message = typeof parsed.error?.message === "string" ? parsed.error.message.trim() : "";
-    const raw = typeof parsed.error?.metadata?.raw === "string" ? parsed.error.metadata.raw.trim() : "";
+    const parsed = JSON.parse(body) as
+      | { error?: { message?: unknown; metadata?: { raw?: unknown } } }
+      | Array<{ error?: { message?: unknown } }>;
+    const record = Array.isArray(parsed) ? undefined : parsed;
+    const error = Array.isArray(parsed) ? parsed[0]?.error : parsed.error;
+    const message = typeof error?.message === "string" ? error.message.trim() : "";
+    const raw = typeof record?.error?.metadata?.raw === "string" ? record.error.metadata.raw.trim() : "";
     return [message, raw].filter((part) => part.length > 0).join(": ");
   } catch {
     return "";

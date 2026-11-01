@@ -26,7 +26,7 @@ In `apps/api/.env`, set:
 
 - `DATABASE_URL` to the Neon pooled connection string (`sslmode=require` and `pgbouncer=true`).
 - `DIRECT_URL` to the Neon direct connection string (`sslmode=require`). Prisma uses it for migrations.
-- `LLM_API_KEY`. The default provider is Gemini’s free tier through its OpenAI-compatible endpoint (`LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL`). Free tiers are rate-limited and may retain prompts.
+- `LLM_API_KEY`. The study call posts to OpenRouter (`https://openrouter.ai/api/v1/chat/completions`) with that key as `Authorization: Bearer`, and the model `google/gemma-4-31b-it:free`. It does not call `generativelanguage.googleapis.com`. Free tiers are rate-limited and may retain prompts.
 - `R2_ENDPOINT`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `R2_BUCKET` before uploading a PDF or photo. Text notes still work if those four are blank.
 
 ```bash
@@ -72,11 +72,11 @@ Set `LLM_PROVIDER=fake` in `apps/api/.env` to exercise the app without calling a
 
 ## Streamlit
 
-The Expo app stays the main client. `apps/streamlit/app.py` is a separate one-page client: register or log in, paste text or upload a PDF or image, pick or create a subject and tags, then the same page shows the revision cards and a Quiz button. It calls the existing study command (`apps/api/src/study-cli.ts`). That command uses Gemini (`LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`) and saves the note in Neon (`DATABASE_URL`). It does not upload the file to R2. Scanned PDFs are still rejected. A short Traditional Chinese how-to on the page says: upload PDF, image, or text, then revision cards, then Quiz.
+The Expo app stays the main client. `apps/streamlit/app.py` is a separate one-page client: register or log in, paste text or upload a PDF or image, pick or create a subject and tags, then the same page shows the revision cards and a Quiz button. It calls the existing study command (`apps/api/src/study-cli.ts`). That command posts to `https://openrouter.ai/api/v1/chat/completions` with `LLM_API_KEY` as a Bearer token and model `google/gemma-4-31b-it:free`, and saves the note in Neon (`DATABASE_URL`). It does not upload the file to R2. Scanned PDFs are still rejected. A short Traditional Chinese how-to on the page says: upload PDF, image, or text, then revision cards, then Quiz.
 
 Each account is an email or username plus a password. The password is stored hashed on the user row. A person only sees notes, subjects, and tags saved on that account. After a note exists, paste a passage from its source to add one revision card built from that quote only. Quiz answers are saved in Neon as a correct and missed count on each card for that user. The next quiz on the note starts with the cards that user misses most often.
 
-Gemma models such as `google/gemma-4-31b-it:free` on OpenRouter are called with one user message. The request does not send a system role, `response_format`, `max_tokens`, or `temperature`, because that host returns HTTP 400 for those fields. The JSON instructions stay in the user message. Zod still checks the reply, and a bad reply is retried once. A provider failure shows the upstream error text.
+The study model is `google/gemma-4-31b-it:free`. The request is one user message: no system role, `response_format`, `max_tokens`, or `temperature`. Zod still checks the reply, and a bad reply is retried once. A provider failure shows the upstream error text. A configured Google Generative Language URL is sent to OpenRouter instead.
 
 Image OCR uses Tesseract in this process for English, Simplified Chinese, and Japanese when `eng`, `chi_sim`, and `jpn` are installed. The repo root `packages.txt` asks Streamlit Community Cloud to apt-install those packs. If any of them is missing, the page sends the image to the existing API extractor instead.
 
@@ -87,7 +87,7 @@ npm run db:migrate -w @rev/api
 streamlit run apps/streamlit/app.py
 ```
 
-The study command reads `apps/api/.env` for `DATABASE_URL` and the Gemini settings. Do not commit that file.
+The study command reads `apps/api/.env` for `DATABASE_URL` and the OpenRouter settings. Do not commit that file.
 
 ### Streamlit Community Cloud
 
@@ -103,9 +103,9 @@ Do not buy a domain. Leave the app URL blank so Community Cloud assigns a free `
 ```toml
 DATABASE_URL = "postgresql://USER:PASSWORD@HOST/neondb?sslmode=require&pgbouncer=true"
 LLM_PROVIDER = "openai"
-LLM_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
-LLM_API_KEY = "your-gemini-key"
-LLM_MODEL = "gemini-3.8-flash"
+LLM_BASE_URL = "https://openrouter.ai/api/v1"
+LLM_API_KEY = "your-openrouter-key"
+LLM_MODEL = "google/gemma-4-31b-it:free"
 LLM_JSON_MODE = "object"
 ```
 
@@ -113,7 +113,7 @@ Run `npm run db:migrate -w @rev/api` against that database before the first regi
 
 7. Click **Save**, then click **Deploy**.
 
-The first launch downloads Node 22 when the machine does not already have Node 20 or newer, then installs the API workspace so the page can run the existing study command. Put the real Neon URL and Gemini key only in that Secrets box.
+The first launch downloads Node 22 when the machine does not already have Node 20 or newer, then installs the API workspace so the page can run the existing study command. Put the real Neon URL and OpenRouter key only in that Secrets box.
 
 ## Tests
 

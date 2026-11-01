@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { OPENROUTER_BASE_URL, OPENROUTER_STUDY_MODEL, studyChatTarget } from "./llm/study-target";
 
 const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
@@ -10,9 +11,9 @@ const envSchema = z.object({
     .refine((value) => value.includes("@"), "DEV_USER_EMAIL must look like an email.")
     .default("dev@localhost"),
   LLM_PROVIDER: z.enum(["openai", "fake"]).default("openai"),
-  LLM_BASE_URL: z.string().url().default("https://generativelanguage.googleapis.com/v1beta/openai"),
+  LLM_BASE_URL: z.string().url().default(OPENROUTER_BASE_URL),
   LLM_API_KEY: z.string().optional().default(""),
-  LLM_MODEL: z.string().trim().min(1).default("gemini-3.8-flash"),
+  LLM_MODEL: z.string().trim().min(1).default(OPENROUTER_STUDY_MODEL),
   LLM_TIMEOUT_MS: z.coerce.number().int().positive().default(45_000),
   LLM_JSON_MODE: z.enum(["object", "off"]).default("object"),
   R2_ENDPOINT: z.string().optional().default(""),
@@ -91,9 +92,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       : null,
     llm: {
       provider: parsed.data.LLM_PROVIDER,
-      baseUrl: parsed.data.LLM_BASE_URL,
+      ...studyChatTarget(parsed.data.LLM_BASE_URL, parsed.data.LLM_MODEL),
       apiKey: parsed.data.LLM_API_KEY.trim(),
-      model: parsed.data.LLM_MODEL,
       timeoutMs: parsed.data.LLM_TIMEOUT_MS,
       jsonMode: parsed.data.LLM_JSON_MODE === "object",
     },
@@ -103,7 +103,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
 export function assertServerConfig(config: AppConfig): void {
   if (config.llm.provider === "openai" && config.llm.apiKey.length === 0) {
     throw new Error(
-      "LLM_API_KEY is required. Copy .env.example to apps/api/.env and set a Gemini API key, or set LLM_PROVIDER=fake for local UI work.",
+      "LLM_API_KEY is required. Copy .env.example to apps/api/.env and set an OpenRouter API key, or set LLM_PROVIDER=fake for local UI work.",
     );
   }
 }
