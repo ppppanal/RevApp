@@ -72,7 +72,7 @@ Set `LLM_PROVIDER=fake` in `apps/api/.env` to exercise the app without calling a
 
 ## Streamlit
 
-The Expo app stays the main client. `apps/streamlit/app.py` is a separate one-page client: register or log in, paste text or upload a PDF or image, pick or create a subject and tags, then it calls the existing study command (`apps/api/src/study-cli.ts`). That command uses Gemini (`LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`) and saves the note in Neon (`DATABASE_URL`). It does not upload the file to R2. Scanned PDFs are still rejected.
+The Expo app stays the main client. `apps/streamlit/app.py` is a separate one-page client: register or log in, paste text or upload a PDF or image, pick or create a subject and tags, then the same page shows the revision cards and a Quiz button. It calls the existing study command (`apps/api/src/study-cli.ts`). That command uses Gemini (`LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`) and saves the note in Neon (`DATABASE_URL`). It does not upload the file to R2. Scanned PDFs are still rejected. A short Traditional Chinese how-to on the page says: upload PDF, image, or text, then revision cards, then Quiz.
 
 Each account is an email or username plus a password. The password is stored hashed on the user row. A person only sees notes, subjects, and tags saved on that account. After a note exists, paste a passage from its source to add one revision card built from that quote only. Quiz answers are saved in Neon as a correct and missed count on each card for that user. The next quiz on the note starts with the cards that user misses most often.
 
