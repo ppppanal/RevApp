@@ -7,7 +7,7 @@ import { imageContentType, sourceObjectKey } from "../storage/object-key";
 import type { ObjectStore } from "../storage/object-store";
 import { cleanNoteText, deriveTitle, stripNullBytes } from "../text/clean-text";
 import type { StudyGenerationService } from "./generation-service";
-import type { CreateNoteCommand, NoteApi } from "./types";
+import type { CreateNoteCommand, CreateNoteOptions, NoteApi } from "./types";
 
 const noteInclude = {
   subject: true,
@@ -25,15 +25,21 @@ export class NoteService implements NoteApi {
     private readonly files: ObjectStore | null = null,
   ) {}
 
-  async create(userId: string, command: CreateNoteCommand): Promise<NoteResponse> {
-    if (command.source.kind !== "text" && !this.files) {
+  async create(
+    userId: string,
+    command: CreateNoteCommand,
+    options: CreateNoteOptions = {},
+  ): Promise<NoteResponse> {
+    const storeFiles = options.storeFiles !== false;
+    if (storeFiles && command.source.kind !== "text" && !this.files) {
       throw new AppError(
         "STORAGE_FAILED",
         "File storage is not configured. Set R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, and R2_BUCKET.",
         503,
       );
     }
-    const extracted = await this.extractor.extract(command.source);
+    const extracted =
+      options.extractedText !== undefined ? options.extractedText : await this.extractor.extract(command.source);
     const cleaned = cleanNoteText(extracted);
     if (!cleaned) {
       throw new AppError("EMPTY_TEXT", "Note text is empty after cleaning.", 400);
@@ -46,7 +52,7 @@ export class NoteService implements NoteApi {
       );
     }
 
-    const stored = await this.storeUpload(userId, command);
+    const stored = storeFiles ? await this.storeUpload(userId, command) : null;
 
     const subject = command.subjectName
       ? await this.prisma.subject.upsert({
@@ -66,11 +72,17 @@ export class NoteService implements NoteApi {
         subjectId: subject?.id,
         sourceFiles: {
           create: {
-            id: stored?.id,
+            ...(stored?.id ? { id: stored.id } : {}),
             kind: command.source.kind === "text" ? "TEXT" : command.source.kind === "pdf" ? "PDF" : "IMAGE",
-            filename: command.source.kind === "text" ? null : command.source.filename,
-            mimeType: stored?.mimeType ?? (command.source.kind === "image" ? command.source.mimeType : undefined),
-            storageKey: stored?.key,
+            filename: command.source.kind === "text" ? null : (command.source.filename ?? null),
+            mimeType:
+              stored?.mimeType ??
+              (command.source.kind === "pdf"
+                ? "application/pdf"
+                : command.source.kind === "image"
+                  ? command.source.mimeType
+                  : undefined),
+            storageKey: stored?.key ?? null,
             extractedText: stripNullBytes(extracted),
           },
         },

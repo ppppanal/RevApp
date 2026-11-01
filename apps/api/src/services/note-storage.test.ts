@@ -70,6 +70,49 @@ describe("NoteService file storage", () => {
     expect(Buffer.from(stored?.body ?? [])).toEqual(Buffer.from(original));
   });
 
+  it("saves a PDF note without object storage when storeFiles is false", async () => {
+    const files = {
+      async put() {
+        throw new Error("should not store");
+      },
+    };
+    let createData: {
+      rawText?: string;
+      sourceFiles?: { create?: { storageKey?: string | null; mimeType?: string; kind?: string; filename?: string | null } };
+    } | undefined;
+    const extractorCalled = { value: false };
+    const skipping: TextExtractor = {
+      async extract() {
+        extractorCalled.value = true;
+        throw new Error("should not extract");
+      },
+    };
+    const prisma = {
+      note: {
+        async create({ data }: { data: typeof createData }) {
+          createData = data;
+          throw new Error("stop after insert");
+        },
+      },
+    };
+    const service = new NoteService(prisma as never, skipping, { generate: async () => "" } as never, files);
+    await expect(
+      service.create(
+        "user_1",
+        { source: { kind: "pdf", filename: "notes.pdf" } },
+        { storeFiles: false, extractedText: "Mitochondria produce ATP." },
+      ),
+    ).rejects.toThrow(/stop after insert/);
+    expect(extractorCalled.value).toBe(false);
+    expect(createData?.rawText).toBe("Mitochondria produce ATP.");
+    expect(createData?.sourceFiles?.create).toMatchObject({
+      kind: "PDF",
+      filename: "notes.pdf",
+      mimeType: "application/pdf",
+      storageKey: null,
+    });
+  });
+
   it("returns a typed error when the upload fails", async () => {
     const files = {
       async put() {

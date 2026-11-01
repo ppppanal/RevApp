@@ -7,8 +7,15 @@ export interface CreateNoteCommand {
   source: ExtractionSource;
 }
 
+export interface CreateNoteOptions {
+  /** When false, a PDF or image note is saved without uploading the original bytes. */
+  storeFiles?: boolean;
+  /** Skip extraction and use this text. The HTTP API does not set it. */
+  extractedText?: string;
+}
+
 export interface NoteApi {
-  create(userId: string, command: CreateNoteCommand): Promise<NoteResponse>;
+  create(userId: string, command: CreateNoteCommand, options?: CreateNoteOptions): Promise<NoteResponse>;
   list(userId: string): Promise<NoteSummary[]>;
   get(userId: string, noteId: string): Promise<NoteResponse>;
 }

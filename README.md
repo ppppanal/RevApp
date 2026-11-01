@@ -70,6 +70,46 @@ curl -s -X POST http://localhost:3000/notes \
 
 Set `LLM_PROVIDER=fake` in `apps/api/.env` to exercise the app without calling a model.
 
+## Streamlit
+
+The Expo app stays the main client. `apps/streamlit/app.py` is a separate one-page client: paste text or upload a PDF or image, then it calls the existing study command (`apps/api/src/study-cli.ts`). That command uses Gemini (`LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`) and saves the note in Neon (`DATABASE_URL`). It does not upload the file to R2. Scanned PDFs are still rejected.
+
+Image OCR uses Tesseract in this process for English, Simplified Chinese, and Japanese when `eng`, `chi_sim`, and `jpn` are installed. The repo root `packages.txt` asks Streamlit Community Cloud to apt-install those packs. If any of them is missing, the page sends the image to the existing API extractor instead.
+
+Python dependencies are `apps/streamlit/requirements.txt`. Open the page with:
+
+```bash
+APP_PASSWORD=choose-a-password streamlit run apps/streamlit/app.py
+```
+
+The study command reads `apps/api/.env` for `DATABASE_URL` and the Gemini settings. `APP_PASSWORD` is the page gate. Do not commit either file.
+
+### Streamlit Community Cloud
+
+Do not buy a domain. Leave the app URL blank so Community Cloud assigns a free `streamlit.app` address.
+
+1. Open [share.streamlit.io](https://share.streamlit.io) and sign in with GitHub.
+2. In the upper-right corner, click **Create app**.
+3. When asked “Do you already have an app?”, click **Yup, I have an app**.
+4. Set the repository to `ppppanal/RevApp`, the branch to `cursor/pdf-ocr-quiz-3e25`, and the main file path to `apps/streamlit/app.py`.
+5. Leave **App URL** / **Custom subdomain (optional)** blank.
+6. Click **Advanced settings**. Choose Python **3.12**. In **Secrets**, paste:
+
+```toml
+APP_PASSWORD = "choose-a-password"
+DATABASE_URL = "postgresql://USER:PASSWORD@HOST/neondb?sslmode=require&pgbouncer=true"
+LLM_PROVIDER = "openai"
+LLM_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
+LLM_API_KEY = "your-gemini-key"
+LLM_MODEL = "gemini-3.8-flash"
+LLM_JSON_MODE = "object"
+DEV_USER_EMAIL = "dev@localhost"
+```
+
+7. Click **Save**, then click **Deploy**.
+
+The first launch downloads Node 22 when the machine does not already have Node 20 or newer, then installs the API workspace so the page can run the existing study command. Put the real Neon URL and Gemini key only in that Secrets box.
+
 ## Tests
 
 ```bash
