@@ -107,7 +107,11 @@ LLM_BASE_URL = "https://openrouter.ai/api/v1"
 LLM_API_KEY = "your-openrouter-key"
 LLM_MODEL = "google/gemma-4-31b-it:free"
 LLM_JSON_MODE = "object"
+# Optional. Only this signed-in account sees the Streamlit controls on the right.
+# ADMIN_LOGIN = "your-admin-username"
 ```
+
+The Deploy button and the header menu on the right are hidden for every viewer. Set `ADMIN_LOGIN` to an account's email or username when that account should see them.
 
 Run `npm run db:migrate -w @rev/api` against that database before the first registration. Accounts are created on the page.
 

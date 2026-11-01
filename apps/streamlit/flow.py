@@ -24,6 +24,13 @@ class StudyError(Exception):
     pass
 
 
+def is_admin_login(login: str | None, expected: str | None) -> bool:
+    admin = (expected or "").strip().lower()
+    if not admin:
+        return False
+    return (login or "").strip().lower() == admin
+
+
 def missing_ocr_languages(installed: set[str]) -> list[str]:
     return [language for language in OCR_LANGUAGES if language not in installed]
 

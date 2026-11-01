@@ -16,9 +16,42 @@ REPO_ROOT = APP_DIR.parents[1]
 if str(APP_DIR) not in sys.path:
     sys.path.insert(0, str(APP_DIR))
 
-from flow import StudyError, build_study_payload, installed_tesseract_languages, missing_ocr_languages, run_study
+from flow import (
+    StudyError,
+    build_study_payload,
+    installed_tesseract_languages,
+    is_admin_login,
+    missing_ocr_languages,
+    run_study,
+)
 
 st.set_page_config(page_title="Rev", layout="centered")
+
+_RIGHT_CONTROLS = """
+<style>
+[data-testid="stToolbar"],
+[data-testid="stDecoration"],
+[data-testid="stStatusWidget"],
+[data-testid="stMainMenu"],
+#MainMenu,
+.stDeployButton,
+.stAppDeployButton {
+  display: none !important;
+}
+</style>
+"""
+
+
+def hide_right_controls() -> None:
+    """The Streamlit toolbar sits on the right and is visible to every viewer.
+
+    Keep it for the admin account only.
+    """
+    user = st.session_state.get("user")
+    login = user.get("login") if isinstance(user, dict) else ""
+    if is_admin_login(str(login or ""), child_env().get("ADMIN_LOGIN", "")):
+        return
+    st.markdown(_RIGHT_CONTROLS, unsafe_allow_html=True)
 
 
 def child_env() -> dict[str, str]:
@@ -30,6 +63,9 @@ def child_env() -> dict[str, str]:
     except Exception:
         pass
     return env
+
+
+hide_right_controls()
 
 
 def missing_runtime_settings(env: dict[str, str], *, needs_model: bool) -> list[str]:

@@ -2,7 +2,7 @@ import json
 import unittest
 from pathlib import Path
 
-from flow import StudyError, StudySession, build_study_payload, missing_ocr_languages, redact
+from flow import StudyError, StudySession, build_study_payload, is_admin_login, missing_ocr_languages, redact
 
 
 class FlowTests(unittest.TestCase):
@@ -74,6 +74,12 @@ class FlowTests(unittest.TestCase):
     def test_empty_input(self) -> None:
         with self.assertRaises(StudyError):
             build_study_payload(text="  ")
+
+    def test_only_the_admin_login_is_admin(self) -> None:
+        self.assertFalse(is_admin_login("ada", ""))
+        self.assertFalse(is_admin_login("ada", "admin"))
+        self.assertTrue(is_admin_login("Admin", "admin"))
+        self.assertFalse(is_admin_login("", "admin"))
 
     def test_redact_database_url(self) -> None:
         self.assertNotIn("secret", redact("connect postgresql://user:secret@host/db failed"))
