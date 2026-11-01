@@ -86,6 +86,8 @@ describe("OpenAiCompatibleProvider", () => {
     );
     expect(body?.messages).toEqual([{ role: "user", content: "Return strict JSON only.\n\nNotes:\nCells" }]);
     expect(body).not.toHaveProperty("response_format");
+    expect(body).not.toHaveProperty("max_tokens");
+    expect(body).not.toHaveProperty("temperature");
     expect(JSON.stringify(body)).not.toContain("json_schema");
     expect(JSON.stringify(body)).not.toContain("\"role\":\"system\"");
   });
@@ -117,8 +119,34 @@ describe("OpenAiCompatibleProvider", () => {
       .complete([{ role: "user", content: "Notes" }], { timeoutMs: 1000 })
       .catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(GenerationError);
-    expect(error).toMatchObject({ code: "PROVIDER_ERROR", message: "The model provider returned 401." });
+    expect(error).toMatchObject({ code: "PROVIDER_ERROR", message: "bad key [redacted]" });
     expect(JSON.stringify(error)).not.toContain("test-key");
+  });
+
+  it("returns the OpenRouter error text instead of only the status", async () => {
+    const provider = new OpenAiCompatibleProvider({
+      ...options,
+      apiKey: "secret-key",
+      fetchImpl: async () =>
+        new Response(
+          JSON.stringify({
+            error: {
+              message: "Provider returned error",
+              code: 400,
+              metadata: { raw: "unsupported_parameter: max_tokens secret-key" },
+            },
+          }),
+          { status: 400, headers: { "content-type": "application/json" } },
+        ),
+    });
+    const error = await provider
+      .complete([{ role: "user", content: "Notes" }], { timeoutMs: 1000 })
+      .catch((caught: unknown) => caught);
+    expect(error).toMatchObject({
+      code: "PROVIDER_ERROR",
+      message: "Provider returned error: unsupported_parameter: max_tokens [redacted]",
+    });
+    expect(JSON.stringify(error)).not.toContain("secret-key");
   });
 
   it("maps an aborted request to a timeout error", async () => {

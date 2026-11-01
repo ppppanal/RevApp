@@ -28,9 +28,10 @@ export class OpenAiCompatibleProvider implements LlmProvider {
       });
 
       if (!response.ok) {
-        const detail = redact(await response.text(), this.options.apiKey).slice(0, 300);
+        const body = await response.text();
+        const detail = providerErrorMessage(response.status, body, this.options.apiKey);
         console.error(`LLM provider status ${response.status}: ${detail}`);
-        throw new GenerationError("PROVIDER_ERROR", `The model provider returned ${response.status}.`);
+        throw new GenerationError("PROVIDER_ERROR", detail);
       }
 
       let payload: unknown;
@@ -63,20 +64,43 @@ export function prepareChatRequest(
   options: { baseUrl: string; model: string; jsonMode: boolean },
   messages: ChatMessage[],
 ): Record<string, unknown> {
-  const plain = usesPlainPrompt(options);
+  if (usesPlainPrompt(options)) {
+    // Gemma on OpenRouter returns 400 for a system role, for response_format when the
+    // host turns it into a strict json_schema, and for max_tokens on this model family.
+    // A user message alone is the request shape the free endpoint accepts.
+    return {
+      model: options.model,
+      messages: foldSystemIntoUser(messages),
+    };
+  }
   return {
     model: options.model,
-    messages: plain ? foldSystemIntoUser(messages) : messages,
+    messages,
     temperature: 0.2,
     max_tokens: 4096,
-    ...(options.jsonMode && !plain ? { response_format: { type: "json_object" as const } } : {}),
+    ...(options.jsonMode ? { response_format: { type: "json_object" as const } } : {}),
   };
 }
 
 function usesPlainPrompt(options: { model: string }): boolean {
-  // Gemma on OpenRouter returns 400 for a system role, and for response_format when
-  // the host sends it as a strict json_schema. The same limits apply to other Gemma ids.
   return options.model.toLowerCase().includes("gemma");
+}
+
+function providerErrorMessage(status: number, body: string, secret: string): string {
+  const parsed = providerErrorText(body);
+  const text = redact(parsed || body, secret).replace(/\s+/g, " ").trim().slice(0, 300);
+  return text || `The model provider returned ${status}.`;
+}
+
+function providerErrorText(body: string): string {
+  try {
+    const parsed = JSON.parse(body) as { error?: { message?: unknown; metadata?: { raw?: unknown } } };
+    const message = typeof parsed.error?.message === "string" ? parsed.error.message.trim() : "";
+    const raw = typeof parsed.error?.metadata?.raw === "string" ? parsed.error.metadata.raw.trim() : "";
+    return [message, raw].filter((part) => part.length > 0).join(": ");
+  } catch {
+    return "";
+  }
 }
 
 function foldSystemIntoUser(messages: ChatMessage[]): ChatMessage[] {
