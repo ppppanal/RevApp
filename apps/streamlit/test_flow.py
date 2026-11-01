@@ -1,6 +1,8 @@
+import json
 import unittest
+from pathlib import Path
 
-from flow import StudyError, build_study_payload, missing_ocr_languages, redact
+from flow import StudyError, StudySession, build_study_payload, missing_ocr_languages, redact
 
 
 class FlowTests(unittest.TestCase):
@@ -75,6 +77,104 @@ class FlowTests(unittest.TestCase):
 
     def test_redact_database_url(self) -> None:
         self.assertNotIn("secret", redact("connect postgresql://user:secret@host/db failed"))
+
+    def test_repeat_call_reuses_one_study_process(self) -> None:
+        proc = _ScriptedProcess()
+
+        def popen(args, **_kwargs):
+            proc.starts += 1
+            proc.args = list(args)
+            return proc
+
+        session = StudySession(popen=popen)
+        env = {"LLM_PROVIDER": "fake"}
+        root = Path(__file__).resolve().parents[2]
+        first = session.call({"action": "login", "login": "ada", "password": "secret"}, repo_root=root, env=env)
+        second = session.call({"action": "home", "userId": "user_1"}, repo_root=root, env=env)
+        self.assertEqual(proc.starts, 1)
+        self.assertIn("--serve", proc.args)
+        self.assertEqual(first["login"], "ada")
+        self.assertEqual(second["notes"], [])
+        self.assertEqual(len(proc.requests), 2)
+
+    def test_a_dead_study_process_starts_again(self) -> None:
+        created: list[_ScriptedProcess] = []
+
+        def popen(*_args, **_kwargs):
+            proc = _ScriptedProcess()
+            created.append(proc)
+            return proc
+
+        session = StudySession(popen=popen)
+        env = {"LLM_PROVIDER": "fake"}
+        root = Path(__file__).resolve().parents[2]
+        session.call({"action": "login", "login": "ada", "password": "secret"}, repo_root=root, env=env)
+        created[0].returncode = 0
+        session.call({"action": "login", "login": "ada", "password": "secret"}, repo_root=root, env=env)
+        self.assertEqual(len(created), 2)
+
+    def test_worker_error_stays_on_the_same_process(self) -> None:
+        proc = _ScriptedProcess(error="Unknown email or username, or the password is wrong.")
+
+        def popen(*_args, **_kwargs):
+            proc.starts += 1
+            return proc
+
+        session = StudySession(popen=popen)
+        root = Path(__file__).resolve().parents[2]
+        with self.assertRaises(StudyError) as caught:
+            session.call({"action": "login", "login": "ada", "password": "nope"}, repo_root=root, env={})
+        self.assertIn("password", str(caught.exception))
+        self.assertIsNone(proc.poll())
+        session.call({"action": "login", "login": "ada", "password": "secret"}, repo_root=root, env={})
+        self.assertEqual(proc.starts, 1)
+
+
+class _ScriptedProcess:
+    def __init__(self, error: str = "") -> None:
+        self.starts = 0
+        self.args: list[str] = []
+        self.requests: list[dict] = []
+        self.stdout = self
+        self.stdin = self
+        self.stderr = None
+        self.returncode: int | None = None
+        self._lines = ['{"ready":true}\n']
+        self._error = error
+        self._saw_request = False
+
+    def __call__(self, args, **_kwargs):
+        return self
+
+    def write(self, data: str) -> None:
+        body = json.loads(data)
+        self.requests.append(body)
+        if self._error and not self._saw_request:
+            self._lines.append(json.dumps({"error": {"code": "AUTH", "message": self._error}}) + "\n")
+            self._saw_request = True
+            return
+        if body.get("action") == "home":
+            self._lines.append('{"notes":[],"subjects":[],"tags":[]}\n')
+        else:
+            self._lines.append(json.dumps({"id": "user_1", "login": body.get("login", "")}) + "\n")
+
+    def flush(self) -> None:
+        return None
+
+    def readline(self) -> str:
+        return self._lines.pop(0)
+
+    def poll(self) -> int | None:
+        return self.returncode
+
+    def terminate(self) -> None:
+        self.returncode = 0
+
+    def kill(self) -> None:
+        self.returncode = -9
+
+    def wait(self, timeout: float | None = None) -> int:
+        return self.returncode or 0
 
 
 if __name__ == "__main__":

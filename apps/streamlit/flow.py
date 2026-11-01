@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import atexit
 import base64
 import json
 import re
 import shutil
 import subprocess
+import threading
 from pathlib import Path
+from typing import Callable
 
 from runtime import ensure_study_runtime
 
@@ -102,24 +105,163 @@ def build_study_payload(
     return payload
 
 
-def run_study(payload: dict, *, repo_root: Path, env: dict[str, str]) -> dict:
-    runtime = ensure_study_runtime(repo_root, env)
-    try:
-        completed = subprocess.run(
-            [runtime.node, str(runtime.tsx), str(repo_root / "apps" / "api" / "src" / "study-cli.ts")],
-            input=json.dumps(payload),
+_READY_TIMEOUT_SECONDS = 90
+_ACCOUNT_TIMEOUT_SECONDS = 30
+_MODEL_TIMEOUT_SECONDS = 180
+
+
+class StudySession:
+    """One warm study process for the Streamlit server.
+
+    Login used to start a new Node process on every call. The first call still
+    waits for that process. Later calls reuse it.
+    """
+
+    def __init__(self, popen: Callable[..., subprocess.Popen[str]] = subprocess.Popen) -> None:
+        self._popen = popen
+        self._lock = threading.Lock()
+        self._proc: subprocess.Popen[str] | None = None
+        self._env_key: tuple[tuple[str, str], ...] | None = None
+        self._stderr: list[str] = []
+
+    def call(self, payload: dict, *, repo_root: Path, env: dict[str, str]) -> dict:
+        with self._lock:
+            try:
+                proc = self._process(repo_root, env)
+                return self._roundtrip(proc, payload)
+            except StudyError:
+                raise
+            except Exception as error:
+                self._stop()
+                message = redact(str(error)).strip()
+                raise StudyError(message or "Study generation failed.") from error
+
+    def _process(self, repo_root: Path, env: dict[str, str]) -> subprocess.Popen[str]:
+        key = tuple(sorted(env.items()))
+        proc = self._proc
+        if proc is not None and proc.poll() is None and key == self._env_key:
+            return proc
+        self._stop()
+        runtime = ensure_study_runtime(repo_root, env)
+        command = [
+            runtime.node,
+            str(runtime.tsx),
+            str(repo_root / "apps" / "api" / "src" / "study-cli.ts"),
+            "--serve",
+        ]
+        proc = self._popen(
+            command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            capture_output=True,
+            bufsize=1,
             cwd=repo_root,
             env=runtime.env,
-            timeout=180,
-            check=False,
         )
-    except subprocess.TimeoutExpired as error:
-        raise StudyError("The model timed out.") from error
-    if completed.returncode != 0:
-        raise StudyError(_error_message(completed.stderr))
-    return _parse_note(completed.stdout)
+        self._proc = proc
+        self._env_key = key
+        self._stderr = []
+        if proc.stderr is not None:
+            threading.Thread(target=_drain, args=(proc.stderr, self._stderr), daemon=True).start()
+        try:
+            ready = _readline(proc.stdout, _READY_TIMEOUT_SECONDS)
+        except TimeoutError as error:
+            self._stop()
+            raise StudyError("Study generation failed.") from error
+        if proc.poll() is not None or not ready:
+            detail = _error_message("".join(self._stderr))
+            self._stop()
+            raise StudyError(detail)
+        try:
+            parsed = json.loads(ready)
+        except json.JSONDecodeError as error:
+            self._stop()
+            raise StudyError("Study generation failed.") from error
+        if not isinstance(parsed, dict) or parsed.get("ready") is not True:
+            self._stop()
+            raise StudyError(_error_message(ready))
+        return proc
+
+    def _roundtrip(self, proc: subprocess.Popen[str], payload: dict) -> dict:
+        if proc.stdin is None or proc.stdout is None:
+            self._stop()
+            raise StudyError("Study generation failed.")
+        timeout = _MODEL_TIMEOUT_SECONDS if payload.get("action") in {None, "create", "quote"} else _ACCOUNT_TIMEOUT_SECONDS
+        try:
+            proc.stdin.write(json.dumps(payload) + "\n")
+            proc.stdin.flush()
+            line = _readline(proc.stdout, timeout)
+        except (TimeoutError, BrokenPipeError, OSError) as error:
+            self._stop()
+            if isinstance(error, TimeoutError):
+                raise StudyError("The model timed out.") from error
+            raise StudyError("Study generation failed.") from error
+        if proc.poll() is not None or not line:
+            detail = _error_message("".join(self._stderr))
+            self._stop()
+            raise StudyError(detail)
+        try:
+            parsed = json.loads(line)
+        except json.JSONDecodeError as error:
+            self._stop()
+            raise StudyError("Study generation returned an unreadable result.") from error
+        if isinstance(parsed, dict) and isinstance(parsed.get("error"), dict):
+            message = parsed["error"].get("message")
+            if isinstance(message, str) and message.strip():
+                raise StudyError(message.strip())
+            raise StudyError("Study generation failed.")
+        if not isinstance(parsed, dict):
+            raise StudyError("Study generation returned an unreadable result.")
+        return parsed
+
+    def _stop(self) -> None:
+        proc = self._proc
+        self._proc = None
+        self._env_key = None
+        if proc is None or proc.poll() is not None:
+            return
+        proc.terminate()
+        try:
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
+_session = StudySession()
+atexit.register(_session._stop)
+
+
+def run_study(payload: dict, *, repo_root: Path, env: dict[str, str]) -> dict:
+    return _session.call(payload, repo_root=repo_root, env=env)
+
+
+def _readline(stream: object, timeout: float) -> str:
+    if stream is None or not hasattr(stream, "readline"):
+        return ""
+    box: list[str] = []
+
+    def read() -> None:
+        box.append(stream.readline())
+
+    thread = threading.Thread(target=read, daemon=True)
+    thread.start()
+    thread.join(timeout)
+    if thread.is_alive():
+        raise TimeoutError
+    return box[0] if box else ""
+
+
+def _drain(stream: object, bucket: list[str]) -> None:
+    readline = getattr(stream, "readline", None)
+    if readline is None:
+        return
+    while True:
+        line = readline()
+        if not line:
+            return
+        bucket.append(redact(line))
+        del bucket[:-20]
 
 
 def redact(text: str) -> str:
