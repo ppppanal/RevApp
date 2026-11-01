@@ -17,6 +17,14 @@ const accountSchema = z.discriminatedUnion("action", [
     noteId: z.string().trim().min(1),
     quote: z.string(),
   }).strict(),
+  z.object({ action: z.literal("quiz"), userId: userIdSchema, noteId: z.string().trim().min(1) }).strict(),
+  z.object({
+    action: z.literal("grade"),
+    userId: userIdSchema,
+    noteId: z.string().trim().min(1),
+    cardId: z.string().trim().min(1),
+    attempt: z.string(),
+  }).strict(),
 ]);
 
 const apiRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -72,6 +80,7 @@ async function main(): Promise<void> {
   const { StudyGenerationService } = await import("./services/generation-service");
   const { NoteService } = await import("./services/note-service");
   const { AccountService } = await import("./services/account-service");
+  const { QuizService } = await import("./services/quiz-service");
 
   try {
     const config = loadConfig();
@@ -93,6 +102,7 @@ async function main(): Promise<void> {
       null,
     );
     const accounts = new AccountService(prisma);
+    const quizzes = new QuizService(prisma);
     let result: unknown;
     if (actionName === "create") {
       const prepared = parseStudyCliInput(payload);
@@ -112,8 +122,11 @@ async function main(): Promise<void> {
       else if (action.action === "home") {
         const labels = await accounts.labels(action.userId);
         result = { notes: await notes.list(action.userId), ...labels };
-      } else if (action.action === "get") result = await notes.get(action.userId, action.noteId);
-      else result = await notes.addQuoteCard(action.userId, action.noteId, action.quote);
+      }       else if (action.action === "get") result = await notes.get(action.userId, action.noteId);
+      else if (action.action === "quiz") result = await quizzes.start(action.userId, action.noteId);
+      else if (action.action === "grade") {
+        result = await quizzes.grade(action.userId, action.noteId, action.cardId, action.attempt);
+      } else result = await notes.addQuoteCard(action.userId, action.noteId, action.quote);
     }
     process.stdout.write(`${JSON.stringify(result)}\n`);
   } finally {

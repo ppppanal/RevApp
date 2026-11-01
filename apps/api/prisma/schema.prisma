@@ -19,6 +19,7 @@ model User {
   subjects     Subject[]
   notes        Note[]
   tags         Tag[]
+  cardScores   CardScore[]
 }
 
 model Subject {
@@ -96,9 +97,26 @@ model Flashcard {
   personal  Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  scores    CardScore[]
 
   @@unique([noteId, position])
   @@index([noteId])
+}
+
+model CardScore {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  flashcardId String
+  flashcard   Flashcard @relation(fields: [flashcardId], references: [id], onDelete: Cascade)
+  correct     Int       @default(0)
+  incorrect   Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([userId, flashcardId])
+  @@index([userId])
+  @@index([flashcardId])
 }
 
 model Tag {

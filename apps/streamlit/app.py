@@ -114,6 +114,102 @@ def account_gate() -> dict | None:
     return None
 
 
+def begin_quiz(user: dict, note: dict) -> None:
+    try:
+        started = call({"action": "quiz", "userId": user["id"], "noteId": note["id"]}, needs_model=False)
+    except StudyError as error:
+        st.error(str(error))
+        return
+    st.session_state["quiz"] = {
+        "noteId": note["id"],
+        "title": started.get("title") or note.get("title") or "Quiz",
+        "cards": started.get("cards") or [],
+        "index": 0,
+        "sessionCorrect": 0,
+        "phase": "ask",
+    }
+    st.rerun()
+
+
+def render_quiz(user: dict, note: dict) -> None:
+    quiz = st.session_state["quiz"]
+    cards = quiz.get("cards") or []
+    st.subheader(quiz.get("title") or "Quiz")
+    if st.button("Back to note"):
+        st.session_state.pop("quiz", None)
+        st.rerun()
+    if not cards:
+        st.write("No cards to quiz.")
+        return
+
+    total = len(cards)
+    index = quiz.get("index", 0)
+    if index >= total:
+        st.markdown(f"**Score {quiz.get('sessionCorrect', 0)} of {total}**")
+        st.caption("That score is saved on your account. The next quiz starts with the cards you miss most.")
+        if st.button("Quiz again"):
+            begin_quiz(user, note)
+        return
+
+    card = cards[index]
+    attempts = card.get("correctCount", 0) + card.get("incorrectCount", 0)
+    history = (
+        f"Missed {card.get('incorrectCount', 0)} of {attempts}."
+        if attempts
+        else "Not quizzed yet."
+    )
+    st.caption(f"Card {index + 1} of {total}. {history} Session score {quiz.get('sessionCorrect', 0)} of {total}.")
+    label = card.get("question") or "Card"
+    if card.get("personal"):
+        label = f"Revision card: {label}"
+    st.markdown(f"**{label}**")
+
+    if quiz.get("phase") == "review":
+        result = quiz.get("last") or {}
+        if result.get("correct"):
+            st.success("Matched.")
+        else:
+            st.error("Not a match.")
+        st.write(result.get("expected") or "")
+        st.caption(
+            f"Saved on this card: {result.get('correctCount', 0)} correct, {result.get('incorrectCount', 0)} missed."
+        )
+        if st.button("Next"):
+            quiz["index"] = index + 1
+            quiz["phase"] = "ask"
+            quiz.pop("last", None)
+            st.session_state["quiz"] = quiz
+            st.rerun()
+        return
+
+    with st.form(f"quiz-answer-{card.get('id')}"):
+        attempt = st.text_input("Your answer")
+        submitted = st.form_submit_button("Check")
+    if submitted:
+        try:
+            graded = call(
+                {
+                    "action": "grade",
+                    "userId": user["id"],
+                    "noteId": note["id"],
+                    "cardId": card["id"],
+                    "attempt": attempt,
+                },
+                needs_model=False,
+            )
+        except StudyError as error:
+            st.error(str(error))
+            return
+        if graded.get("correct"):
+            quiz["sessionCorrect"] = quiz.get("sessionCorrect", 0) + 1
+        card["correctCount"] = graded.get("correctCount", 0)
+        card["incorrectCount"] = graded.get("incorrectCount", 0)
+        quiz["phase"] = "review"
+        quiz["last"] = graded
+        st.session_state["quiz"] = quiz
+        st.rerun()
+
+
 def note_label(note: dict) -> str:
     subject = note.get("subjectName")
     title = note.get("title") or "Untitled note"
@@ -130,6 +226,7 @@ def main() -> None:
         st.session_state.pop("user", None)
         st.session_state.pop("note", None)
         st.session_state.pop("selected-note", None)
+        st.session_state.pop("quiz", None)
         st.rerun()
 
     langs = installed_tesseract_languages()
@@ -169,8 +266,18 @@ def main() -> None:
     elif not selected:
         note = None
 
-    if note:
+    quiz = st.session_state.get("quiz")
+    if quiz and quiz.get("noteId") != (note or {}).get("id"):
+        st.session_state.pop("quiz", None)
+        quiz = None
+
+    if note and quiz:
+        render_quiz(user, note)
+    elif note:
         render_note(note)
+        if note.get("flashcards"):
+            if st.button("Start quiz", key=f"start-quiz-{note['id']}"):
+                begin_quiz(user, note)
         quote = st.text_area("Quote", placeholder="Paste a passage from the source.", key=f"quote-{note['id']}")
         if st.button("Make revision card", key=f"quote-button-{note['id']}"):
             try:
