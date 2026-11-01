@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { GenerationError } from "../errors";
 import type { ChatMessage, LlmCompletionOptions, LlmProvider } from "../llm/provider";
-import { StudyGenerationService } from "./generation-service";
+import { FREE_MODEL_BUSY_MESSAGE, StudyGenerationService } from "./generation-service";
 
 const valid = JSON.stringify({
   summary: "Cells make ATP.",
@@ -75,5 +75,31 @@ describe("StudyGenerationService", () => {
       code: "PROVIDER_ERROR",
     });
     expect(provider.calls).toBe(1);
+  });
+
+  it("retries an upstream rate limit with backoff, then says the free model is busy", async () => {
+    const limited = "Provider returned error: google/gemma-4-31b-it:free is temporarily rate-limited upstream. Please retry shortly.";
+    const waits: number[] = [];
+    const recovers = new ScriptedProvider([
+      new GenerationError("PROVIDER_ERROR", limited),
+      valid,
+    ]);
+    await expect(
+      new StudyGenerationService(recovers, 1000, async (ms) => {
+        waits.push(ms);
+      }).generate("notes"),
+    ).resolves.toMatchObject({ summary: "Cells make ATP." });
+    expect(recovers.calls).toBe(2);
+    expect(waits).toEqual([1000]);
+
+    waits.length = 0;
+    const stuck = new ScriptedProvider([new GenerationError("PROVIDER_ERROR", limited)]);
+    await expect(
+      new StudyGenerationService(stuck, 1000, async (ms) => {
+        waits.push(ms);
+      }).generate("notes"),
+    ).rejects.toMatchObject({ code: "PROVIDER_ERROR", message: FREE_MODEL_BUSY_MESSAGE });
+    expect(stuck.calls).toBe(4);
+    expect(waits).toEqual([1000, 2000, 4000]);
   });
 });

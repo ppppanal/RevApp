@@ -33,45 +33,60 @@ export function buildQuoteMessages(quote: string): ChatMessage[] {
   ];
 }
 
+const UPSTREAM_RATE_LIMIT_ATTEMPTS = 4;
+const UPSTREAM_RATE_LIMIT_BACKOFF_MS = [1_000, 2_000, 4_000];
+export const FREE_MODEL_BUSY_MESSAGE = "免費模型現在很忙，請稍後再試。";
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export function isUpstreamRateLimit(error: GenerationError): boolean {
+  return error.code === "PROVIDER_ERROR" && /temporarily rate-limited upstream/i.test(error.message);
+}
+
 export class StudyGenerationService {
   constructor(
     private readonly provider: LlmProvider,
     private readonly timeoutMs: number,
+    private readonly sleep: (ms: number) => Promise<void> = delay,
   ) {}
 
   async generate(cleanedText: string): Promise<StudyPack> {
-    let lastError: GenerationError | undefined;
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      try {
-        const raw = await this.provider.complete(buildStudyMessages(cleanedText), {
-          timeoutMs: this.timeoutMs,
-        });
-        return parseStudyPack(raw);
-      } catch (error) {
-        if (error instanceof GenerationError && (error.code === "TIMEOUT" || error.code === "INVALID_JSON")) {
-          lastError = error;
-          continue;
-        }
-        if (error instanceof GenerationError) throw error;
-        throw new GenerationError("PROVIDER_ERROR", "Study generation failed.");
-      }
-    }
-    throw lastError ?? new GenerationError("PROVIDER_ERROR", "Study generation failed.");
+    return this.produce(buildStudyMessages(cleanedText), parseStudyPack);
   }
 
   async generateQuoteCard(quote: string): Promise<QuoteCard> {
+    return this.produce(buildQuoteMessages(quote), parseQuoteCard);
+  }
+
+  private async produce<T>(messages: ChatMessage[], parse: (raw: string) => T): Promise<T> {
     let lastError: GenerationError | undefined;
-    for (let attempt = 0; attempt < 2; attempt += 1) {
+    let parseAttempts = 0;
+    let rateAttempts = 0;
+    while (parseAttempts < 2) {
       try {
-        const raw = await this.provider.complete(buildQuoteMessages(quote), { timeoutMs: this.timeoutMs });
-        return parseQuoteCard(raw);
+        const raw = await this.provider.complete(messages, { timeoutMs: this.timeoutMs });
+        return parse(raw);
       } catch (error) {
-        if (error instanceof GenerationError && (error.code === "TIMEOUT" || error.code === "INVALID_JSON")) {
+        if (!(error instanceof GenerationError)) {
+          throw new GenerationError("PROVIDER_ERROR", "Study generation failed.");
+        }
+        if (error.code === "TIMEOUT" || error.code === "INVALID_JSON") {
+          parseAttempts += 1;
           lastError = error;
           continue;
         }
-        if (error instanceof GenerationError) throw error;
-        throw new GenerationError("PROVIDER_ERROR", "Study generation failed.");
+        if (isUpstreamRateLimit(error)) {
+          rateAttempts += 1;
+          if (rateAttempts >= UPSTREAM_RATE_LIMIT_ATTEMPTS) {
+            throw new GenerationError("PROVIDER_ERROR", FREE_MODEL_BUSY_MESSAGE);
+          }
+          const wait = UPSTREAM_RATE_LIMIT_BACKOFF_MS[rateAttempts - 1] ?? 4_000;
+          await this.sleep(wait);
+          continue;
+        }
+        throw error;
       }
     }
     throw lastError ?? new GenerationError("PROVIDER_ERROR", "Study generation failed.");
