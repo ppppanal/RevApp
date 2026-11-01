@@ -52,14 +52,43 @@ export class OpenAiCompatibleProvider implements LlmProvider {
   }
 
   private requestBody(messages: ChatMessage[]): Record<string, unknown> {
-    return {
-      model: this.options.model,
+    return prepareChatRequest(
+      { baseUrl: this.options.baseUrl, model: this.options.model, jsonMode: this.options.jsonMode },
       messages,
-      temperature: 0.2,
-      max_tokens: 4096,
-      ...(this.options.jsonMode ? { response_format: { type: "json_object" } } : {}),
-    };
+    );
   }
+}
+
+export function prepareChatRequest(
+  options: { baseUrl: string; model: string; jsonMode: boolean },
+  messages: ChatMessage[],
+): Record<string, unknown> {
+  const plain = usesPlainPrompt(options);
+  return {
+    model: options.model,
+    messages: plain ? foldSystemIntoUser(messages) : messages,
+    temperature: 0.2,
+    max_tokens: 4096,
+    ...(options.jsonMode && !plain ? { response_format: { type: "json_object" as const } } : {}),
+  };
+}
+
+function usesPlainPrompt(options: { model: string }): boolean {
+  // Gemma on OpenRouter returns 400 for a system role, and for response_format when
+  // the host sends it as a strict json_schema. The same limits apply to other Gemma ids.
+  return options.model.toLowerCase().includes("gemma");
+}
+
+function foldSystemIntoUser(messages: ChatMessage[]): ChatMessage[] {
+  const instructions = messages
+    .filter((message) => message.role === "system")
+    .map((message) => message.content.trim())
+    .filter((content) => content.length > 0);
+  const users = messages.filter((message) => message.role !== "system");
+  if (instructions.length === 0) return users.length > 0 ? users : messages;
+  const prompt = users.map((message) => message.content).join("\n\n");
+  const content = prompt.length > 0 ? `${instructions.join("\n\n")}\n\n${prompt}` : instructions.join("\n\n");
+  return [{ role: "user", content }];
 }
 
 function chatCompletionsUrl(baseUrl: string): string {

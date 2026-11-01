@@ -42,6 +42,54 @@ describe("OpenAiCompatibleProvider", () => {
     expect(body.response_format).toEqual({ type: "json_object" });
   });
 
+  it("keeps the system role and json_object for Gemini", async () => {
+    let body: { messages?: unknown; response_format?: unknown } | undefined;
+    const provider = new OpenAiCompatibleProvider({
+      ...options,
+      fetchImpl: async (_input, init) => {
+        body = JSON.parse(String(init?.body));
+        return jsonResponse({ choices: [{ message: { content: "{\"summary\":\"ok\"}" } }] });
+      },
+    });
+    await provider.complete(
+      [
+        { role: "system", content: "Return strict JSON only." },
+        { role: "user", content: "Notes:\nCells" },
+      ],
+      { timeoutMs: 1000 },
+    );
+    expect(body?.messages).toEqual([
+      { role: "system", content: "Return strict JSON only." },
+      { role: "user", content: "Notes:\nCells" },
+    ]);
+    expect(body?.response_format).toEqual({ type: "json_object" });
+  });
+
+  it("asks Gemma on OpenRouter with one user message and no response format", async () => {
+    let body: Record<string, unknown> | undefined;
+    const provider = new OpenAiCompatibleProvider({
+      baseUrl: "https://openrouter.ai/api/v1",
+      apiKey: "test-key",
+      model: "google/gemma-4-31b-it:free",
+      jsonMode: true,
+      fetchImpl: async (_input, init) => {
+        body = JSON.parse(String(init?.body));
+        return jsonResponse({ choices: [{ message: { content: "{\"summary\":\"ok\"}" } }] });
+      },
+    });
+    await provider.complete(
+      [
+        { role: "system", content: "Return strict JSON only." },
+        { role: "user", content: "Notes:\nCells" },
+      ],
+      { timeoutMs: 1000 },
+    );
+    expect(body?.messages).toEqual([{ role: "user", content: "Return strict JSON only.\n\nNotes:\nCells" }]);
+    expect(body).not.toHaveProperty("response_format");
+    expect(JSON.stringify(body)).not.toContain("json_schema");
+    expect(JSON.stringify(body)).not.toContain("\"role\":\"system\"");
+  });
+
   it("reads array message content and treats an empty completion as invalid JSON", async () => {
     const provider = new OpenAiCompatibleProvider({
       ...options,
