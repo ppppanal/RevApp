@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { GenerationError } from "../errors";
 import type { ChatMessage, LlmCompletionOptions, LlmProvider } from "../llm/provider";
+import { NO_PAIRED_LINES_MESSAGE } from "../llm/paired-lines";
 import { FREE_MODEL_BUSY_MESSAGE, StudyGenerationService } from "./generation-service";
 
 const valid = JSON.stringify({
@@ -77,7 +78,7 @@ describe("StudyGenerationService", () => {
     expect(provider.calls).toBe(1);
   });
 
-  it("retries an upstream rate limit with backoff, then says the free model is busy", async () => {
+  it("retries an upstream rate limit, then builds cards from paired lines", async () => {
     const limited = "Provider returned error: google/gemma-4-31b-it:free is temporarily rate-limited upstream. Please retry shortly.";
     const waits: number[] = [];
     const recovers = new ScriptedProvider([
@@ -93,13 +94,23 @@ describe("StudyGenerationService", () => {
     expect(waits).toEqual([1000]);
 
     waits.length = 0;
+    const notes = "ATP\tenergy currency\njust a sentence\nCell: basic unit";
     const stuck = new ScriptedProvider([new GenerationError("PROVIDER_ERROR", limited)]);
-    await expect(
-      new StudyGenerationService(stuck, 1000, async (ms) => {
-        waits.push(ms);
-      }).generate("notes"),
-    ).rejects.toMatchObject({ code: "PROVIDER_ERROR", message: FREE_MODEL_BUSY_MESSAGE });
+    const pack = await new StudyGenerationService(stuck, 1000, async (ms) => {
+      waits.push(ms);
+    }).generate(notes);
     expect(stuck.calls).toBe(4);
     expect(waits).toEqual([1000, 2000, 4000]);
+    expect(pack.flashcards).toEqual([
+      { question: "ATP", answer: "energy currency" },
+      { question: "Cell", answer: "basic unit" },
+    ]);
+    expect(JSON.stringify(pack)).not.toContain(FREE_MODEL_BUSY_MESSAGE);
+
+    const unpaired = new ScriptedProvider([new GenerationError("PROVIDER_ERROR", limited)]);
+    await expect(
+      new StudyGenerationService(unpaired, 1000, async () => undefined).generate("no pairs here"),
+    ).rejects.toThrow(NO_PAIRED_LINES_MESSAGE);
+    expect(unpaired.calls).toBe(4);
   });
 });
