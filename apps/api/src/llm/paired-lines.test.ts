@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AppError } from "../errors";
-import { localRevisionPack, NO_PAIRED_LINES_MESSAGE, splitPairedLine } from "./paired-lines";
+import { kanaKanjiCards, localRevisionPack, NO_PAIRED_LINES_MESSAGE, splitPairedLine } from "./paired-lines";
 
 describe("paired lines", () => {
   it("splits a line on a tab, several spaces, a pipe, or a colon", () => {
@@ -32,5 +32,25 @@ describe("paired lines", () => {
     ]);
     expect(() => localRevisionPack("no pairs here")).toThrow(AppError);
     expect(() => localRevisionPack("no pairs here")).toThrow(NO_PAIRED_LINES_MESSAGE);
+  });
+
+  it("builds kanji to kana cards from a three-column vocab sheet", () => {
+    const text = [
+      "大家的日本語",
+      "第1課",
+      "單字",
+      "わたし\t我",
+      "せんせい\t先生\t老師",
+      "あのひと\tあの人\t他、她、那個人",
+      "だれ\t誰(哪位)",
+      "どうぞよろしくおねがいします。\tどうぞよろしくお願いします。\t請多關照.請多指教.",
+      "Note: this gloss is not a second card",
+    ].join("\n");
+    expect(kanaKanjiCards(text)).toEqual([
+      { question: "先生", answer: "せんせい" },
+      { question: "あの人", answer: "あのひと" },
+      { question: "どうぞよろしくお願いします。", answer: "どうぞよろしくおねがいします。" },
+    ]);
+    expect(localRevisionPack(text).flashcards).toEqual(kanaKanjiCards(text));
   });
 });

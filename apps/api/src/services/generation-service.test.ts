@@ -112,5 +112,15 @@ describe("StudyGenerationService", () => {
       new StudyGenerationService(unpaired, 1000, async () => undefined).generate("no pairs here"),
     ).rejects.toThrow(NO_PAIRED_LINES_MESSAGE);
     expect(unpaired.calls).toBe(4);
+
+    const layout = "わたし\t我\nせんせい\t先生\t老師";
+    const vocab = new ScriptedProvider([new GenerationError("PROVIDER_ERROR", limited)]);
+    const kanji = await new StudyGenerationService(vocab, 1000, async () => undefined).generate(
+      "cleaned prose",
+      layout,
+    );
+    expect(kanji.flashcards).toEqual([{ question: "先生", answer: "せんせい" }]);
+    expect(vocab.messages[0]?.[1]?.content).toContain("cleaned prose");
+    expect(vocab.messages[0]?.[1]?.content).not.toContain("せんせい");
   });
 });

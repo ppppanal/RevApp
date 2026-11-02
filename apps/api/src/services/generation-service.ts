@@ -53,12 +53,12 @@ export class StudyGenerationService {
     private readonly sleep: (ms: number) => Promise<void> = delay,
   ) {}
 
-  async generate(cleanedText: string): Promise<StudyPack> {
+  async generate(cleanedText: string, layoutText = cleanedText): Promise<StudyPack> {
     try {
       return await this.produce(buildStudyMessages(cleanedText), parseStudyPack);
     } catch (error) {
       if (error instanceof GenerationError && error.message === FREE_MODEL_BUSY_MESSAGE) {
-        return localRevisionPack(cleanedText);
+        return localRevisionPack(layoutText);
       }
       throw error;
     }

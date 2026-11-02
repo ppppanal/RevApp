@@ -104,7 +104,7 @@ export class NoteService implements NoteApi {
     });
 
     try {
-      const pack = await this.generation.generate(cleaned);
+      const pack = await this.generation.generate(cleaned, stripNullBytes(extracted));
       const saved = await this.prisma.note.update({
         where: { id: note.id },
         data: {
