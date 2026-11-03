@@ -395,10 +395,15 @@ def main() -> None:
     notes = home.get("notes") or []
     labels = {item["id"]: note_label(item) for item in notes}
     note = st.session_state.get("note")
-    if note and note.get("id") not in labels:
+    note_from = st.session_state.get("note-from")
+    pending_id = st.session_state.get("pending-note")
+    if (
+        isinstance(note, dict)
+        and note.get("id") not in labels
+        and not _created_on_upload(note, note_from, pending_id)
+    ):
         note = None
         st.session_state.pop("note", None)
-    quizzing = bool(note) and (st.session_state.get("quiz") or {}).get("noteId") == note.get("id")
 
     if page == "cards":
         pending = st.session_state.pop("pending-note", None)
@@ -427,15 +432,48 @@ def main() -> None:
             render_result(user, note)
         return
 
-    if not (quizzing and st.session_state.get("note-from") == "upload"):
+    note, note_from = _pack_on_upload_page(user, note, note_from, pending_id)
+    quizzing = bool(note) and (st.session_state.get("quiz") or {}).get("noteId") == note.get("id")
+    if not (quizzing and note_from == "upload"):
         langs = installed_tesseract_languages()
         if not missing_ocr_languages(langs):
             st.caption("Image OCR uses Tesseract for English, Simplified Chinese, and Japanese.")
         else:
             st.caption("Image OCR uses the existing extractor. Scanned PDFs are not supported.")
         render_upload(user, home)
-    if note and st.session_state.get("note-from") == "upload":
+    if note and note_from == "upload":
         render_result(user, note)
+
+
+def _created_on_upload(note: dict, note_from: object, pending_id: object) -> bool:
+    """A pack from Create study pack stays on the upload page even if the saved list has not caught up."""
+    if note_from == "upload":
+        return True
+    return isinstance(pending_id, str) and bool(pending_id) and note.get("id") == pending_id
+
+
+def _pack_on_upload_page(
+    user: dict,
+    note: dict | None,
+    note_from: object,
+    pending_id: object,
+) -> tuple[dict | None, object]:
+    """Load the pack that was just created so its cards render under the form."""
+    if not isinstance(pending_id, str) or not pending_id:
+        return note, note_from
+    if isinstance(note, dict) and note.get("id") == pending_id and "flashcards" in note:
+        if note_from != "upload":
+            st.session_state["note-from"] = "upload"
+            note_from = "upload"
+        return note, note_from
+    try:
+        loaded = call({"action": "get", "userId": user["id"], "noteId": pending_id}, needs_model=False)
+    except StudyError as error:
+        st.error(str(error))
+        return note, note_from
+    st.session_state["note"] = loaded
+    st.session_state["note-from"] = "upload"
+    return loaded, "upload"
 
 
 main()
