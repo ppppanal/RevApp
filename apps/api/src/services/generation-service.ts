@@ -5,6 +5,7 @@ import { parseQuoteCard, type QuoteCard } from "../llm/parse-quote-card";
 import { parseStudyPack, type StudyPack } from "../llm/parse-study-pack";
 import type { ChatMessage, LlmProvider } from "../llm/provider";
 import { mergeStudyPacks, studyChunks } from "../llm/study-chunks";
+import { keepFlashcard } from "../text/section-text";
 
 const SYSTEM_PROMPT = `You are a study assistant. Turn the user's notes into a study pack.
 These notes may be one section of a longer document. Use only this section.
@@ -74,7 +75,8 @@ export class StudyGenerationService {
       packs.push(await this.generateChunk(chunk));
     }
     if (packs.length === 0) return paragraphRevisionPack("");
-    return mergeStudyPacks(packs);
+    const pack = mergeStudyPacks(packs);
+    return { ...pack, flashcards: pack.flashcards.filter((card) => keepFlashcard(card)) };
   }
 
   private async generateChunk(text: string): Promise<StudyPack> {

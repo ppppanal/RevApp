@@ -51,7 +51,8 @@ describe("StudyGenerationService", () => {
     ]);
     const timed = await new StudyGenerationService(timesOut, 1000).generate("notes");
     expect(timesOut.calls).toBe(2);
-    expect(timed.flashcards).toEqual([{ question: "notes", answer: "notes" }]);
+    expect(timed.keyPoints.map((point) => point.content)).toEqual(["notes"]);
+    expect(timed.flashcards).toEqual([]);
 
     const invalid = new ScriptedProvider(["nope", "{"]);
     const notes = "Mitochondria produce ATP.\n\nATP is the energy currency.";
@@ -110,10 +111,7 @@ describe("StudyGenerationService", () => {
       "Mitochondria produce ATP.",
       "ATP is the energy currency.",
     ]);
-    expect(pack.flashcards.map((card) => card.answer)).toEqual([
-      "Mitochondria produce ATP.",
-      "ATP is the energy currency.",
-    ]);
+    expect(pack.flashcards).toEqual([]);
     expect(JSON.stringify(pack)).not.toContain(FREE_MODEL_BUSY_MESSAGE);
 
     const empty = new ScriptedProvider([new GenerationError("PROVIDER_ERROR", limited)]);
@@ -161,16 +159,14 @@ describe("StudyGenerationService", () => {
     const stuck = new ScriptedProvider([unreadable]);
     const pack = await new StudyGenerationService(stuck, 1000).generate(notes);
     expect(stuck.calls).toBe(2);
-    expect(pack.flashcards.map((card) => card.answer)).toEqual([
-      "Mitochondria produce ATP.",
-      "ATP is the energy currency.",
-    ]);
+    expect(pack.flashcards).toEqual([]);
     expect(JSON.stringify(pack)).not.toContain("unreadable completion");
 
     const schema = new ScriptedProvider([JSON.stringify({ summary: "Only a summary" })]);
     const fallback = await new StudyGenerationService(schema, 1000).generate(notes);
     expect(schema.calls).toBe(2);
-    expect(fallback.flashcards).toHaveLength(2);
+    expect(fallback.keyPoints).toHaveLength(2);
+    expect(fallback.flashcards).toEqual([]);
 
     const embedded = new ScriptedProvider([`The trace mentions {braces}.\n${valid}`]);
     await expect(new StudyGenerationService(embedded, 1000).generate(notes)).resolves.toMatchObject({

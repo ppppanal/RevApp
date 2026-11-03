@@ -25,6 +25,45 @@ export function isSectionHeading(text: string): boolean {
   return false;
 }
 
+// A slide title or numbered topic, not a one-word term and not a question.
+export function isLessonHeading(text: string): boolean {
+  const line = text.replace(/\s+/g, " ").trim();
+  if (!isSectionHeading(line) || /[?？]/.test(line)) return false;
+  const title = line.replace(/^(?:\d+[.)]\s*)+/, "").trim();
+  if (/^(?:what|who|when|where|why|how|which|name|define|explain|describe|list)\b/i.test(title)) return false;
+  if (/^\d+(?:\.\d+)*[.)]?\s+\S/.test(line)) return true;
+  if (/^(?:chapter|section|lab|task|part|week|lecture|topic)\b/i.test(line)) return true;
+  return title.split(/\s+/).filter((word) => word.length > 0).length >= 2;
+}
+
+function cardCore(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/^(?:\d+[.)]\s*)+/, "")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isBlankAnswer(answer: string): boolean {
+  const trimmed = answer.replace(/\s+/g, " ").trim();
+  if (!trimmed) return true;
+  if (/^(?:n\/?a|none|null|nil|tbd|-+|—+)$/i.test(trimmed)) return true;
+  return !/[\p{L}\p{N}]/u.test(trimmed);
+}
+
+// Drop a heading used as a card, a blank answer, or an answer that only repeats the question.
+export function keepFlashcard(card: { question: string; answer: string }): boolean {
+  const question = card.question.replace(/\s+/g, " ").trim();
+  const answer = card.answer.replace(/\s+/g, " ").trim();
+  if (!question || isBlankAnswer(answer)) return false;
+  if (isLessonHeading(question)) return false;
+  const questionCore = cardCore(question);
+  const answerCore = cardCore(answer);
+  if (!answerCore || questionCore === answerCore) return false;
+  return true;
+}
+
 // Screenshot captions, page numbers, and hex dumps are not lesson text.
 export function isImageOnlyFragment(text: string): boolean {
   const trimmed = text.replace(/\s+/g, " ").trim();

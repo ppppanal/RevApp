@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { GenerationError } from "../errors";
+import { keepFlashcard } from "../text/section-text";
 
 const keyPointSchema = z
   .object({
@@ -19,7 +20,7 @@ export const studyPackSchema = z
   .object({
     summary: z.string().trim().min(1).max(4_000),
     keyPoints: z.array(keyPointSchema).min(1).max(20),
-    flashcards: z.array(flashcardSchema).min(1).max(30),
+    flashcards: z.array(flashcardSchema).max(30),
   })
   .strict();
 
@@ -105,10 +106,13 @@ function coercePoint(point: unknown): unknown {
   return { kind, content: record.content };
 }
 
-function coerceCard(card: unknown): unknown {
-  if (!card || typeof card !== "object" || Array.isArray(card)) return card;
+function coerceCard(card: unknown): { question: string; answer: string } | undefined {
+  if (!card || typeof card !== "object" || Array.isArray(card)) return undefined;
   const record = card as Record<string, unknown>;
-  return { question: record.question, answer: record.answer };
+  const question = typeof record.question === "string" ? record.question : "";
+  const answer = typeof record.answer === "string" ? record.answer : "";
+  if (!keepFlashcard({ question, answer })) return undefined;
+  return { question: question.trim(), answer: answer.trim() };
 }
 
 function coerceStudyPack(parsed: unknown): unknown {
@@ -124,7 +128,12 @@ function coerceStudyPack(parsed: unknown): unknown {
   return {
     summary: record.summary,
     keyPoints: Array.isArray(record.keyPoints) ? record.keyPoints.map(coercePoint) : record.keyPoints,
-    flashcards: Array.isArray(record.flashcards) ? record.flashcards.map(coerceCard) : record.flashcards,
+    flashcards: Array.isArray(record.flashcards)
+      ? record.flashcards.flatMap((card) => {
+          const kept = coerceCard(card);
+          return kept ? [kept] : [];
+        })
+      : record.flashcards,
   };
 }
 

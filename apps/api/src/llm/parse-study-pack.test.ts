@@ -33,4 +33,22 @@ describe("parseStudyPack", () => {
     expect(() => parseStudyPack("{")).toThrow(/not valid JSON/);
     expect(() => parseStudyPack(JSON.stringify({ summary: "Only a summary" }))).toThrow(/study pack schema/);
   });
+
+  it("drops heading cards, empty answers, and answers that repeat the question", () => {
+    const pack = parseStudyPack(
+      JSON.stringify({
+        summary: "Nutrients and outcomes.",
+        keyPoints: [{ kind: "FACT", content: "Carbohydrates supply energy." }],
+        flashcards: [
+          { question: "4. Nutrient II", answer: "Nutrient II" },
+          { question: "5. 1 Learning Outcomes", answer: "1 Learning Outcomes" },
+          { question: "6. Name the nutrient groups", answer: " " },
+          { question: "7. Name the nutrient groups", answer: "N/A" },
+          { question: "8. State the learning outcome.", answer: "State the learning outcome." },
+          { question: "What do carbohydrates supply?", answer: "Energy" },
+        ],
+      }),
+    );
+    expect(pack.flashcards).toEqual([{ question: "What do carbohydrates supply?", answer: "Energy" }]);
+  });
 });
