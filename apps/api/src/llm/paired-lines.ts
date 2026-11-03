@@ -103,8 +103,30 @@ function vocabRevisionPack(cards: Array<{ question: string; answer: string }>): 
   };
 }
 
+function lineRevisionPack(pairs: PairedLine[]): StudyPack {
+  return {
+    summary: "Revision cards from paired lines.",
+    keyPoints: [
+      {
+        kind: "FACT",
+        content: "Revision cards were built from paired lines in the file.",
+      },
+    ],
+    flashcards: pairs.map((pair) => ({
+      question: pair.term,
+      answer: pair.meaning,
+    })),
+  };
+}
+
 export function localRevisionPack(text: string): StudyPack {
   const vocab = kanaKanjiCards(text);
   if (vocab) return vocabRevisionPack(vocab);
+  const lines = text
+    .split(/\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  const pairs = pairedLinesFromText(text);
+  if (lines.length > 0 && pairs.length === lines.length) return lineRevisionPack(pairs);
   return paragraphRevisionPack(text);
 }

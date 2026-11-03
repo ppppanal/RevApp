@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { GenerationError } from "../errors";
-import { OpenAiCompatibleProvider } from "./openai-compatible";
+import { EMPTY_COMPLETION_MESSAGE, OpenAiCompatibleProvider } from "./openai-compatible";
 
 const options = {
   baseUrl: "https://api.openai.com/v1",
@@ -140,7 +140,33 @@ describe("OpenAiCompatibleProvider", () => {
     });
     await expect(empty.complete([{ role: "user", content: "Notes" }], { timeoutMs: 1000 })).rejects.toMatchObject({
       code: "INVALID_JSON",
+      message: EMPTY_COMPLETION_MESSAGE,
     });
+  });
+
+  it("uses a reasoning field when the message content is empty", async () => {
+    const provider = new OpenAiCompatibleProvider({
+      ...options,
+      model: "nvidia/nemotron-3.5-lightning:free",
+      fetchImpl: async () =>
+        jsonResponse({
+          choices: [{ message: { content: "", reasoning: "{\"summary\":\"from reasoning\"}" } }],
+        }),
+    });
+    await expect(provider.complete([{ role: "user", content: "Notes" }], { timeoutMs: 1000 })).resolves.toBe(
+      "{\"summary\":\"from reasoning\"}",
+    );
+
+    const details = new OpenAiCompatibleProvider({
+      ...options,
+      fetchImpl: async () =>
+        jsonResponse({
+          choices: [{ message: { content: null, reasoning_details: [{ type: "reasoning.text", text: "detail text" }] } }],
+        }),
+    });
+    await expect(details.complete([{ role: "user", content: "Notes" }], { timeoutMs: 1000 })).resolves.toBe(
+      "detail text",
+    );
   });
 
   it("returns a provider error without echoing the API key", async () => {

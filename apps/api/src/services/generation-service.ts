@@ -1,4 +1,5 @@
 import { GenerationError } from "../errors";
+import { EMPTY_COMPLETION_MESSAGE } from "../llm/openai-compatible";
 import { kanaKanjiCards, localRevisionPack, paragraphRevisionPack } from "../llm/paired-lines";
 import { parseQuoteCard, type QuoteCard } from "../llm/parse-quote-card";
 import { parseStudyPack, type StudyPack } from "../llm/parse-study-pack";
@@ -58,9 +59,9 @@ export class StudyGenerationService {
     try {
       return await this.produce(buildStudyMessages(cleanedText), parseStudyPack);
     } catch (error) {
-      if (error instanceof GenerationError && error.message === FREE_MODEL_BUSY_MESSAGE) {
-        return paragraphRevisionPack(cleanedText);
-      }
+      if (!(error instanceof GenerationError)) throw error;
+      if (error.message === FREE_MODEL_BUSY_MESSAGE) return paragraphRevisionPack(cleanedText);
+      if (error.message === EMPTY_COMPLETION_MESSAGE) return localRevisionPack(layoutText);
       throw error;
     }
   }

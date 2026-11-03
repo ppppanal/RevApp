@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { GenerationError } from "../errors";
 import type { ChatMessage, LlmCompletionOptions, LlmProvider } from "../llm/provider";
+import { EMPTY_COMPLETION_MESSAGE } from "../llm/openai-compatible";
 import { NO_PARAGRAPHS_MESSAGE } from "../llm/paired-lines";
 import { FREE_MODEL_BUSY_MESSAGE, StudyGenerationService } from "./generation-service";
 
@@ -122,5 +123,31 @@ describe("StudyGenerationService", () => {
     const kanji = await new StudyGenerationService(vocab, 1000).generate("cleaned prose", layout);
     expect(vocab.calls).toBe(0);
     expect(kanji.flashcards).toEqual([{ question: "先生", answer: "せんせい" }]);
+  });
+
+  it("retries an empty completion once, then builds local cards", async () => {
+    const empty = new GenerationError("INVALID_JSON", EMPTY_COMPLETION_MESSAGE);
+    const notes = "Mitochondria produce ATP.\n\nATP is the energy currency.";
+    const recovers = new ScriptedProvider([empty, valid]);
+    await expect(new StudyGenerationService(recovers, 1000).generate(notes)).resolves.toMatchObject({
+      summary: "Cells make ATP.",
+    });
+    expect(recovers.calls).toBe(2);
+
+    const stuck = new ScriptedProvider([empty]);
+    const pack = await new StudyGenerationService(stuck, 1000).generate(notes);
+    expect(stuck.calls).toBe(2);
+    expect(pack.keyPoints.map((point) => point.content)).toEqual([
+      "Mitochondria produce ATP.",
+      "ATP is the energy currency.",
+    ]);
+    expect(JSON.stringify(pack)).not.toContain(EMPTY_COMPLETION_MESSAGE);
+
+    const lines = new ScriptedProvider([empty]);
+    const paired = await new StudyGenerationService(lines, 1000).generate("ATP\tenergy currency\nCell: basic unit");
+    expect(paired.flashcards).toEqual([
+      { question: "ATP", answer: "energy currency" },
+      { question: "Cell", answer: "basic unit" },
+    ]);
   });
 });

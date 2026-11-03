@@ -128,6 +128,23 @@ function chatCompletionsUrl(baseUrl: string): string {
   return `${trimmed}/chat/completions`;
 }
 
+export const EMPTY_COMPLETION_MESSAGE = "The model provider returned an empty completion.";
+
+function textOf(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (!Array.isArray(value)) return "";
+  return value
+    .map((part) => {
+      if (typeof part === "string") return part;
+      if (!part || typeof part !== "object") return "";
+      if ("text" in part && typeof part.text === "string") return part.text;
+      if ("summary" in part && typeof part.summary === "string") return part.summary;
+      return "";
+    })
+    .join("")
+    .trim();
+}
+
 function readContent(payload: unknown): string {
   if (!payload || typeof payload !== "object") {
     throw new GenerationError("INVALID_JSON", "The model provider returned an unreadable completion.");
@@ -136,21 +153,13 @@ function readContent(payload: unknown): string {
   if (!Array.isArray(choices) || choices.length === 0) {
     throw new GenerationError("INVALID_JSON", "The model provider returned no choices.");
   }
-  const message = (choices[0] as { message?: { content?: unknown } }).message;
-  const content = message?.content;
-  if (typeof content === "string" && content.trim().length > 0) return content;
-  if (Array.isArray(content)) {
-    const text = content
-      .map((part) => {
-        if (typeof part === "string") return part;
-        if (part && typeof part === "object" && "text" in part && typeof part.text === "string") return part.text;
-        return "";
-      })
-      .join("")
-      .trim();
-    if (text.length > 0) return text;
-  }
-  throw new GenerationError("INVALID_JSON", "The model provider returned an empty completion.");
+  const message = (choices[0] as { message?: Record<string, unknown> } | undefined)?.message;
+  const content = textOf(message?.content);
+  if (content.length > 0) return content;
+  const reasoning =
+    textOf(message?.reasoning) || textOf(message?.reasoning_content) || textOf(message?.reasoning_details);
+  if (reasoning.length > 0) return reasoning;
+  throw new GenerationError("INVALID_JSON", EMPTY_COMPLETION_MESSAGE);
 }
 
 function isTimeout(error: unknown): boolean {
