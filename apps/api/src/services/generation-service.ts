@@ -43,6 +43,17 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+const UNREADABLE_STUDY_PACK = new Set([
+  "The model provider returned an unreadable completion.",
+  "The model provider returned no choices.",
+  "The model response was not valid JSON.",
+  "The model response did not match the study pack schema.",
+]);
+
+function isUnreadableStudyPack(error: GenerationError): boolean {
+  return error.code === "INVALID_JSON" && UNREADABLE_STUDY_PACK.has(error.message);
+}
+
 export function isUpstreamRateLimit(error: GenerationError): boolean {
   return error.code === "PROVIDER_ERROR" && /temporarily rate-limited upstream/i.test(error.message);
 }
@@ -62,6 +73,7 @@ export class StudyGenerationService {
       if (!(error instanceof GenerationError)) throw error;
       if (error.message === FREE_MODEL_BUSY_MESSAGE) return paragraphRevisionPack(cleanedText);
       if (error.message === EMPTY_COMPLETION_MESSAGE) return localRevisionPack(layoutText);
+      if (isUnreadableStudyPack(error)) return paragraphRevisionPack(cleanedText);
       throw error;
     }
   }

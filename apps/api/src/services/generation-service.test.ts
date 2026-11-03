@@ -54,10 +54,14 @@ describe("StudyGenerationService", () => {
     expect(timesOut.calls).toBe(2);
 
     const invalid = new ScriptedProvider(["nope", "{"]);
-    await expect(new StudyGenerationService(invalid, 1000).generate("notes")).rejects.toMatchObject({
-      code: "INVALID_JSON",
-    });
+    const notes = "Mitochondria produce ATP.\n\nATP is the energy currency.";
+    const pack = await new StudyGenerationService(invalid, 1000).generate(notes);
     expect(invalid.calls).toBe(2);
+    expect(pack.keyPoints.map((point) => point.content)).toEqual([
+      "Mitochondria produce ATP.",
+      "ATP is the energy currency.",
+    ]);
+    expect(JSON.stringify(pack)).not.toContain("unreadable completion");
   });
 
   it("asks for one card from the quote and not the rest of the note", async () => {
@@ -149,5 +153,35 @@ describe("StudyGenerationService", () => {
       { question: "ATP", answer: "energy currency" },
       { question: "Cell", answer: "basic unit" },
     ]);
+  });
+
+  it("builds paragraph cards when the provider body is not JSON", async () => {
+    const unreadable = new GenerationError("INVALID_JSON", "The model provider returned an unreadable completion.");
+    const notes = "Mitochondria produce ATP.\n\nATP is the energy currency.";
+    const stuck = new ScriptedProvider([unreadable]);
+    const pack = await new StudyGenerationService(stuck, 1000).generate(notes);
+    expect(stuck.calls).toBe(2);
+    expect(pack.flashcards.map((card) => card.answer)).toEqual([
+      "Mitochondria produce ATP.",
+      "ATP is the energy currency.",
+    ]);
+    expect(JSON.stringify(pack)).not.toContain("unreadable completion");
+
+    const schema = new ScriptedProvider([JSON.stringify({ summary: "Only a summary" })]);
+    const fallback = await new StudyGenerationService(schema, 1000).generate(notes);
+    expect(schema.calls).toBe(2);
+    expect(fallback.flashcards).toHaveLength(2);
+
+    const embedded = new ScriptedProvider([`The trace mentions {braces}.\n${valid}`]);
+    await expect(new StudyGenerationService(embedded, 1000).generate(notes)).resolves.toMatchObject({
+      summary: "Cells make ATP.",
+    });
+    expect(embedded.calls).toBe(1);
+
+    const quote = new ScriptedProvider([unreadable]);
+    await expect(
+      new StudyGenerationService(quote, 1000).generateQuoteCard("Mitochondria produce ATP."),
+    ).rejects.toMatchObject({ message: "The model provider returned an unreadable completion." });
+    expect(quote.calls).toBe(2);
   });
 });

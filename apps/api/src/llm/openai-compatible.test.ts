@@ -167,6 +167,78 @@ describe("OpenAiCompatibleProvider", () => {
     await expect(details.complete([{ role: "user", content: "Notes" }], { timeoutMs: 1000 })).resolves.toBe(
       "detail text",
     );
+
+    const nested = new OpenAiCompatibleProvider({
+      ...options,
+      fetchImpl: async () =>
+        jsonResponse({
+          choices: [
+            {
+              message: {
+                content: "",
+                reasoning: { content: [{ type: "reasoning_text", text: "{\"summary\":\"nested\"}" }] },
+              },
+            },
+          ],
+        }),
+    });
+    await expect(nested.complete([{ role: "user", content: "Notes" }], { timeoutMs: 1000 })).resolves.toBe(
+      "{\"summary\":\"nested\"}",
+    );
+  });
+
+  it("reads a pack after a thinking trace when the provider body is not JSON", async () => {
+    const pack = JSON.stringify({
+      summary: "Cells make ATP.",
+      keyPoints: [{ kind: "FACT", content: "Mitochondria produce ATP." }],
+      flashcards: [{ question: "What do mitochondria produce?", answer: "ATP" }],
+    });
+    const provider = new OpenAiCompatibleProvider({
+      ...options,
+      model: "nvidia/nemotron-3.5-lightning:free",
+      fetchImpl: async () =>
+        new Response(`<think>trace {"a":1}</think>\n${JSON.stringify({ choices: [{ message: { content: pack } }] })}`, {
+          status: 200,
+        }),
+    });
+    await expect(provider.complete([{ role: "user", content: "Notes" }], { timeoutMs: 1000 })).resolves.toBe(pack);
+
+    const reasoned = new OpenAiCompatibleProvider({
+      ...options,
+      fetchImpl: async () =>
+        jsonResponse({
+          choices: [{ message: { content: "I think {this} is incomplete", reasoning: `Trace.\n${pack}` } }],
+        }),
+    });
+    await expect(reasoned.complete([{ role: "user", content: "Notes" }], { timeoutMs: 1000 })).resolves.toContain(
+      '"summary":"Cells make ATP."',
+    );
+
+    const stream = new OpenAiCompatibleProvider({
+      ...options,
+      fetchImpl: async () =>
+        new Response(
+          `data: ${JSON.stringify({ choices: [{ delta: { content: pack.slice(0, 12) } }] })}\n\ndata: ${JSON.stringify({ choices: [{ delta: { content: pack.slice(12) } }] })}\n\ndata: [DONE]\n`,
+          { status: 200 },
+        ),
+    });
+    await expect(stream.complete([{ role: "user", content: "Notes" }], { timeoutMs: 1000 })).resolves.toBe(pack);
+  });
+
+  it("gives Nemotron a low reasoning budget so the answer is not truncated", async () => {
+    let body: { max_tokens?: number; reasoning?: { effort?: string } } | undefined;
+    const provider = new OpenAiCompatibleProvider({
+      ...options,
+      baseUrl: "https://openrouter.ai/api/v1",
+      model: "nvidia/nemotron-3.5-lightning:free",
+      fetchImpl: async (_input, init) => {
+        body = JSON.parse(String(init?.body));
+        return jsonResponse({ choices: [{ message: { content: "{\"summary\":\"ok\"}" } }] });
+      },
+    });
+    await provider.complete([{ role: "user", content: "Notes" }], { timeoutMs: 1000 });
+    expect(body?.max_tokens).toBe(8192);
+    expect(body?.reasoning).toEqual({ effort: "low" });
   });
 
   it("returns a provider error without echoing the API key", async () => {
