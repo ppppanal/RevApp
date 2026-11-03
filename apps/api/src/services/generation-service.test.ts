@@ -3,6 +3,7 @@ import { GenerationError } from "../errors";
 import type { ChatMessage, LlmCompletionOptions, LlmProvider } from "../llm/provider";
 import { EMPTY_COMPLETION_MESSAGE } from "../llm/openai-compatible";
 import { NO_PARAGRAPHS_MESSAGE } from "../llm/paired-lines";
+import { STUDY_CHUNK_CHARACTERS } from "../llm/study-chunks";
 import { FREE_MODEL_BUSY_MESSAGE, StudyGenerationService } from "./generation-service";
 
 const valid = JSON.stringify({
@@ -37,7 +38,7 @@ describe("StudyGenerationService", () => {
     expect(provider.messages[0]?.[1]?.content).toContain("Mitochondria produce ATP.");
   });
 
-  it("retries once after bad JSON or a timeout, then returns the typed error", async () => {
+  it("retries once after bad JSON or a timeout, then saves paragraph cards", async () => {
     const recovers = new ScriptedProvider(["not json", valid]);
     await expect(new StudyGenerationService(recovers, 1000).generate("notes")).resolves.toMatchObject({
       summary: "Cells make ATP.",
@@ -48,10 +49,9 @@ describe("StudyGenerationService", () => {
       new GenerationError("TIMEOUT", "The model timed out."),
       new GenerationError("TIMEOUT", "The model timed out."),
     ]);
-    await expect(new StudyGenerationService(timesOut, 1000).generate("notes")).rejects.toMatchObject({
-      code: "TIMEOUT",
-    });
+    const timed = await new StudyGenerationService(timesOut, 1000).generate("notes");
     expect(timesOut.calls).toBe(2);
+    expect(timed.flashcards).toEqual([{ question: "notes", answer: "notes" }]);
 
     const invalid = new ScriptedProvider(["nope", "{"]);
     const notes = "Mitochondria produce ATP.\n\nATP is the energy currency.";
@@ -183,5 +183,59 @@ describe("StudyGenerationService", () => {
       new StudyGenerationService(quote, 1000).generateQuoteCard("Mitochondria produce ATP."),
     ).rejects.toMatchObject({ message: "The model provider returned an unreadable completion." });
     expect(quote.calls).toBe(2);
+  });
+
+  it("sends a long document one chunk at a time and merges the packs", async () => {
+    const partA = `Alpha start. ${"a".repeat(STUDY_CHUNK_CHARACTERS - 20)}`;
+    const partB = `Beta start. ${"b".repeat(STUDY_CHUNK_CHARACTERS - 20)}`;
+    const notes = `${partA}\n\n${partB}`;
+    const packA = JSON.stringify({
+      summary: "Part A.",
+      keyPoints: [{ kind: "FACT", content: "Alpha fact." }],
+      flashcards: [{ question: "What is alpha?", answer: "Alpha" }],
+    });
+    const packB = JSON.stringify({
+      summary: "Part B.",
+      keyPoints: [{ kind: "DEFINITION", content: "Beta fact." }],
+      flashcards: [{ question: "What is beta?", answer: "Beta" }],
+    });
+    const provider = new ScriptedProvider([packA, packB]);
+    const pack = await new StudyGenerationService(provider, 1000).generate(notes);
+    expect(provider.calls).toBe(2);
+    const sent = provider.messages.map((messages) => messages[1]?.content ?? "");
+    expect(sent[0]).toContain("Alpha start.");
+    expect(sent[0]).not.toContain("Beta start.");
+    expect(sent[1]).toContain("Beta start.");
+    expect(sent[1]).not.toContain("Alpha start.");
+    for (const message of sent) {
+      const body = message.replace(/^Notes:\n/, "");
+      expect(body.length).toBeLessThanOrEqual(STUDY_CHUNK_CHARACTERS);
+    }
+    expect(pack.summary).toBe("Part A. Part B.");
+    expect(pack.keyPoints.map((point) => point.content)).toEqual(["Alpha fact.", "Beta fact."]);
+    expect(pack.flashcards.map((card) => card.answer)).toEqual(["Alpha", "Beta"]);
+
+    const timeout = new GenerationError("TIMEOUT", "The model timed out.");
+    const partial = new ScriptedProvider([packA, timeout]);
+    const continued = await new StudyGenerationService(partial, 1000).generate(notes);
+    expect(partial.calls).toBe(3);
+    expect(continued.flashcards[0]).toEqual({ question: "What is alpha?", answer: "Alpha" });
+    expect(continued.flashcards[1]?.answer).toContain("Beta start.");
+    expect(continued.keyPoints.length).toBeGreaterThan(1);
+
+    const failed = new ScriptedProvider([
+      packA,
+      new GenerationError("PROVIDER_ERROR", "The model request failed."),
+    ]);
+    await expect(new StudyGenerationService(failed, 1000).generate(notes)).rejects.toMatchObject({
+      code: "PROVIDER_ERROR",
+    });
+    expect(failed.calls).toBe(2);
+
+    const layout = "わたし\t我\nせんせい\t先生\t老師";
+    const vocab = new ScriptedProvider([packA]);
+    const kanji = await new StudyGenerationService(vocab, 1000).generate(notes, layout);
+    expect(vocab.calls).toBe(0);
+    expect(kanji.flashcards).toEqual([{ question: "先生", answer: "せんせい" }]);
   });
 });

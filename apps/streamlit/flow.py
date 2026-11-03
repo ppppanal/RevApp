@@ -115,6 +115,8 @@ def build_study_payload(
 _READY_TIMEOUT_SECONDS = 90
 _ACCOUNT_TIMEOUT_SECONDS = 30
 _MODEL_TIMEOUT_SECONDS = 180
+# A long PDF is several model calls. Five chunks, each retried once, need more than one call's timeout.
+_CREATE_TIMEOUT_SECONDS = 600
 
 
 class StudySession:
@@ -194,7 +196,13 @@ class StudySession:
         if proc.stdin is None or proc.stdout is None:
             self._stop()
             raise StudyError("Study generation failed.")
-        timeout = _MODEL_TIMEOUT_SECONDS if payload.get("action") in {None, "create", "quote"} else _ACCOUNT_TIMEOUT_SECONDS
+        action = payload.get("action")
+        if action in {None, "create"}:
+            timeout = _CREATE_TIMEOUT_SECONDS
+        elif action == "quote":
+            timeout = _MODEL_TIMEOUT_SECONDS
+        else:
+            timeout = _ACCOUNT_TIMEOUT_SECONDS
         try:
             proc.stdin.write(json.dumps(payload) + "\n")
             proc.stdin.flush()

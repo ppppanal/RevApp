@@ -4,8 +4,10 @@ import { kanaKanjiCards, localRevisionPack, paragraphRevisionPack } from "../llm
 import { parseQuoteCard, type QuoteCard } from "../llm/parse-quote-card";
 import { parseStudyPack, type StudyPack } from "../llm/parse-study-pack";
 import type { ChatMessage, LlmProvider } from "../llm/provider";
+import { mergeStudyPacks, studyChunks } from "../llm/study-chunks";
 
 const SYSTEM_PROMPT = `You are a study assistant. Turn the user's notes into a study pack.
+These notes may be one section of a longer document. Use only this section.
 Return strict JSON only. No markdown fences. No prose before or after the JSON.
 The JSON object must contain exactly these keys:
 - "summary": a short core summary string
@@ -67,13 +69,23 @@ export class StudyGenerationService {
 
   async generate(cleanedText: string, layoutText = cleanedText): Promise<StudyPack> {
     if (kanaKanjiCards(layoutText)) return localRevisionPack(layoutText);
+    const packs: StudyPack[] = [];
+    for (const chunk of studyChunks(cleanedText)) {
+      packs.push(await this.generateChunk(chunk));
+    }
+    if (packs.length === 0) return paragraphRevisionPack(cleanedText);
+    return mergeStudyPacks(packs);
+  }
+
+  private async generateChunk(text: string): Promise<StudyPack> {
     try {
-      return await this.produce(buildStudyMessages(cleanedText), parseStudyPack);
+      return await this.produce(buildStudyMessages(text), parseStudyPack);
     } catch (error) {
       if (!(error instanceof GenerationError)) throw error;
-      if (error.message === FREE_MODEL_BUSY_MESSAGE) return paragraphRevisionPack(cleanedText);
-      if (error.message === EMPTY_COMPLETION_MESSAGE) return localRevisionPack(layoutText);
-      if (isUnreadableStudyPack(error)) return paragraphRevisionPack(cleanedText);
+      if (error.code === "TIMEOUT" || isUnreadableStudyPack(error) || error.message === FREE_MODEL_BUSY_MESSAGE) {
+        return paragraphRevisionPack(text);
+      }
+      if (error.message === EMPTY_COMPLETION_MESSAGE) return localRevisionPack(text);
       throw error;
     }
   }
