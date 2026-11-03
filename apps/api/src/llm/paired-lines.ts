@@ -2,6 +2,7 @@ import { AppError } from "../errors";
 import type { StudyPack } from "./parse-study-pack";
 
 export const NO_PAIRED_LINES_MESSAGE = "This file has no paired lines.";
+export const NO_PARAGRAPHS_MESSAGE = "This file has no paragraphs.";
 
 export interface PairedLine {
   term: string;
@@ -53,27 +54,57 @@ export function kanaKanjiCards(text: string): Array<{ question: string; answer: 
   return cards;
 }
 
-export function localRevisionPack(text: string): StudyPack {
-  const vocab = kanaKanjiCards(text);
-  const flashcards =
-    vocab ??
-    pairedLinesFromText(text).map((pair) => ({
-      question: pair.term,
-      answer: pair.meaning,
-    }));
-  if (flashcards.length === 0) {
-    throw new AppError("VALIDATION", NO_PAIRED_LINES_MESSAGE, 400);
+function clip(text: string, max: number): string {
+  if (text.length <= max) return text;
+  return `${text.slice(0, max - 1).trimEnd()}…`;
+}
+
+export function paragraphsOf(text: string): string[] {
+  const blocks = text
+    .split(/\n\s*\n/)
+    .map((paragraph) => paragraph.replace(/\s+/g, " ").trim())
+    .filter((paragraph) => paragraph.length > 0);
+  if (blocks.length > 0) return blocks;
+  return text
+    .split(/\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+}
+
+export function paragraphRevisionPack(text: string): StudyPack {
+  const paragraphs = paragraphsOf(text);
+  if (paragraphs.length === 0) {
+    throw new AppError("VALIDATION", NO_PARAGRAPHS_MESSAGE, 400);
   }
+  const summarySource = [...paragraphs].sort((a, b) => b.length - a.length)[0] ?? paragraphs[0];
   return {
-    summary: vocab ? "Revision cards from kanji and kana." : "Revision cards from paired lines.",
+    summary: clip(summarySource, 500),
+    keyPoints: paragraphs.map((paragraph) => ({
+      kind: "FACT" as const,
+      content: clip(paragraph, 1_000),
+    })),
+    flashcards: paragraphs.map((paragraph) => ({
+      question: clip(paragraph, 180),
+      answer: clip(paragraph, 4_000),
+    })),
+  };
+}
+
+function vocabRevisionPack(cards: Array<{ question: string; answer: string }>): StudyPack {
+  return {
+    summary: "Revision cards from kanji and kana.",
     keyPoints: [
       {
         kind: "FACT",
-        content: vocab
-          ? "Revision cards were built from rows that have both kanji and kana."
-          : "Revision cards were built from paired lines in the file.",
+        content: "Revision cards were built from rows that have both kanji and kana.",
       },
     ],
-    flashcards,
+    flashcards: cards,
   };
+}
+
+export function localRevisionPack(text: string): StudyPack {
+  const vocab = kanaKanjiCards(text);
+  if (vocab) return vocabRevisionPack(vocab);
+  return paragraphRevisionPack(text);
 }

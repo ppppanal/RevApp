@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { GenerationError } from "../errors";
 import type { ChatMessage, LlmCompletionOptions, LlmProvider } from "../llm/provider";
-import { NO_PAIRED_LINES_MESSAGE } from "../llm/paired-lines";
+import { NO_PARAGRAPHS_MESSAGE } from "../llm/paired-lines";
 import { FREE_MODEL_BUSY_MESSAGE, StudyGenerationService } from "./generation-service";
 
 const valid = JSON.stringify({
@@ -78,7 +78,7 @@ describe("StudyGenerationService", () => {
     expect(provider.calls).toBe(1);
   });
 
-  it("retries an upstream rate limit, then builds cards from paired lines", async () => {
+  it("retries an upstream rate limit, then builds paragraph cards", async () => {
     const limited = "Provider returned error: google/gemma-4-31b-it:free is temporarily rate-limited upstream. Please retry shortly.";
     const waits: number[] = [];
     const recovers = new ScriptedProvider([
@@ -94,33 +94,33 @@ describe("StudyGenerationService", () => {
     expect(waits).toEqual([1000]);
 
     waits.length = 0;
-    const notes = "ATP\tenergy currency\njust a sentence\nCell: basic unit";
+    const notes = "Mitochondria produce ATP.\n\nATP is the energy currency.";
     const stuck = new ScriptedProvider([new GenerationError("PROVIDER_ERROR", limited)]);
     const pack = await new StudyGenerationService(stuck, 1000, async (ms) => {
       waits.push(ms);
     }).generate(notes);
     expect(stuck.calls).toBe(4);
     expect(waits).toEqual([1000, 2000, 4000]);
-    expect(pack.flashcards).toEqual([
-      { question: "ATP", answer: "energy currency" },
-      { question: "Cell", answer: "basic unit" },
+    expect(pack.keyPoints.map((point) => point.content)).toEqual([
+      "Mitochondria produce ATP.",
+      "ATP is the energy currency.",
+    ]);
+    expect(pack.flashcards.map((card) => card.answer)).toEqual([
+      "Mitochondria produce ATP.",
+      "ATP is the energy currency.",
     ]);
     expect(JSON.stringify(pack)).not.toContain(FREE_MODEL_BUSY_MESSAGE);
 
-    const unpaired = new ScriptedProvider([new GenerationError("PROVIDER_ERROR", limited)]);
-    await expect(
-      new StudyGenerationService(unpaired, 1000, async () => undefined).generate("no pairs here"),
-    ).rejects.toThrow(NO_PAIRED_LINES_MESSAGE);
-    expect(unpaired.calls).toBe(4);
+    const empty = new ScriptedProvider([new GenerationError("PROVIDER_ERROR", limited)]);
+    await expect(new StudyGenerationService(empty, 1000, async () => undefined).generate("   ")).rejects.toThrow(
+      NO_PARAGRAPHS_MESSAGE,
+    );
+    expect(empty.calls).toBe(4);
 
     const layout = "わたし\t我\nせんせい\t先生\t老師";
-    const vocab = new ScriptedProvider([new GenerationError("PROVIDER_ERROR", limited)]);
-    const kanji = await new StudyGenerationService(vocab, 1000, async () => undefined).generate(
-      "cleaned prose",
-      layout,
-    );
+    const vocab = new ScriptedProvider([valid]);
+    const kanji = await new StudyGenerationService(vocab, 1000).generate("cleaned prose", layout);
+    expect(vocab.calls).toBe(0);
     expect(kanji.flashcards).toEqual([{ question: "先生", answer: "せんせい" }]);
-    expect(vocab.messages[0]?.[1]?.content).toContain("cleaned prose");
-    expect(vocab.messages[0]?.[1]?.content).not.toContain("せんせい");
   });
 });

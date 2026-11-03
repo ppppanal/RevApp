@@ -27,6 +27,7 @@ describe("RoutingTextExtractor", () => {
     });
     expect(text).toContain("Mitochondria produce ATP.");
     expect(text).toContain("ATP is the energy currency.");
+    expect(text).not.toContain("\t");
   });
 
   it("rejects a PDF with no text layer", async () => {

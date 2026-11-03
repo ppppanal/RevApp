@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { AppError } from "../errors";
-import { kanaKanjiCards, localRevisionPack, NO_PAIRED_LINES_MESSAGE, splitPairedLine } from "./paired-lines";
+import {
+  kanaKanjiCards,
+  localRevisionPack,
+  NO_PARAGRAPHS_MESSAGE,
+  paragraphRevisionPack,
+  splitPairedLine,
+} from "./paired-lines";
 
 describe("paired lines", () => {
   it("splits a line on a tab, several spaces, a pipe, or a colon", () => {
@@ -24,14 +30,19 @@ describe("paired lines", () => {
     expect(splitPairedLine("   ")).toBeNull();
   });
 
-  it("builds one card per paired line and rejects a file with none", () => {
-    const pack = localRevisionPack("ATP\tenergy currency\njust a sentence\nCell: basic unit\n");
-    expect(pack.flashcards).toEqual([
-      { question: "ATP", answer: "energy currency" },
-      { question: "Cell", answer: "basic unit" },
+  it("builds paragraph cards for prose and does not split on a colon", () => {
+    const pack = paragraphRevisionPack("Role: developer and TypeScript.\n\nSkills include PostgreSQL.");
+    expect(pack.keyPoints.map((point) => point.content)).toEqual([
+      "Role: developer and TypeScript.",
+      "Skills include PostgreSQL.",
     ]);
-    expect(() => localRevisionPack("no pairs here")).toThrow(AppError);
-    expect(() => localRevisionPack("no pairs here")).toThrow(NO_PAIRED_LINES_MESSAGE);
+    expect(pack.flashcards.map((card) => card.answer)).toEqual([
+      "Role: developer and TypeScript.",
+      "Skills include PostgreSQL.",
+    ]);
+    expect(pack.summary).toContain("Role: developer");
+    expect(() => localRevisionPack("   ")).toThrow(AppError);
+    expect(() => localRevisionPack("   ")).toThrow(NO_PARAGRAPHS_MESSAGE);
   });
 
   it("builds kanji to kana cards from a three-column vocab sheet", () => {

@@ -1,5 +1,5 @@
 import { GenerationError } from "../errors";
-import { localRevisionPack } from "../llm/paired-lines";
+import { kanaKanjiCards, localRevisionPack, paragraphRevisionPack } from "../llm/paired-lines";
 import { parseQuoteCard, type QuoteCard } from "../llm/parse-quote-card";
 import { parseStudyPack, type StudyPack } from "../llm/parse-study-pack";
 import type { ChatMessage, LlmProvider } from "../llm/provider";
@@ -54,11 +54,12 @@ export class StudyGenerationService {
   ) {}
 
   async generate(cleanedText: string, layoutText = cleanedText): Promise<StudyPack> {
+    if (kanaKanjiCards(layoutText)) return localRevisionPack(layoutText);
     try {
       return await this.produce(buildStudyMessages(cleanedText), parseStudyPack);
     } catch (error) {
       if (error instanceof GenerationError && error.message === FREE_MODEL_BUSY_MESSAGE) {
-        return localRevisionPack(layoutText);
+        return paragraphRevisionPack(cleanedText);
       }
       throw error;
     }
