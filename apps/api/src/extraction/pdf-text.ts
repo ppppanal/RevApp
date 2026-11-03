@@ -1,6 +1,7 @@
 import { getDocumentProxy } from "unpdf";
 import { AppError } from "../errors";
 import { kanaKanjiCards } from "../llm/paired-lines";
+import { isSectionHeading } from "../text/section-text";
 
 const maxPdfPages = 50;
 const sameLineDistance = 3;
@@ -11,6 +12,7 @@ interface Glyph {
   x: number;
   y: number;
   end: number;
+  size: number;
   text: string;
 }
 
@@ -28,7 +30,9 @@ interface Row {
 interface VisualLine {
   x: number;
   y: number;
+  size: number;
   text: string;
+  heading: boolean;
 }
 
 export async function readPdfText(data: Uint8Array): Promise<string> {
@@ -53,11 +57,13 @@ export async function readPdfText(data: Uint8Array): Promise<string> {
         const x = item.transform[4] ?? 0;
         const y = item.transform[5] ?? 0;
         const width = "width" in item && typeof item.width === "number" ? item.width : 0;
-        return [{ x, y, end: x + width, text: item.str }];
+        const height = "height" in item && typeof item.height === "number" ? item.height : 0;
+        const scale = Math.abs(item.transform[3] ?? 0);
+        return [{ x, y, end: x + width, size: height > 0 ? height : scale, text: item.str }];
       });
       const columnText = rowsToText(layoutRows(glyphs));
       if (columnText) columnPages.push(columnText);
-      const paragraphs = paragraphsFromLines(visualLines(glyphs));
+      const paragraphs = paragraphsFromLines(lessonLines(visualLines(glyphs)));
       if (paragraphs.length > 0) paragraphPages.push(paragraphs);
     }
     const columns = columnPages.join("\n\n");
@@ -137,15 +143,65 @@ function visualLines(glyphs: Glyph[]): VisualLine[] {
     group.sort((a, b) => a.x - b.x);
     let text = "";
     let end = Number.NEGATIVE_INFINITY;
+    let size = 0;
     for (const glyph of group) {
       if (text && glyph.x - end > 1.5) text += " ";
       text += glyph.text;
       end = Math.max(end, glyph.end);
+      size = Math.max(size, glyph.size);
     }
     const cleaned = text.replace(/\s+/g, " ").trim();
     if (!cleaned) return [];
-    return [{ x: group[0].x, y: group[0].y, text: cleaned }];
+    return [{ x: group[0].x, y: group[0].y, size, text: cleaned, heading: false }];
   });
+}
+
+const imageBandGap = 48;
+
+function lessonLines(lines: VisualLine[]): VisualLine[] {
+  markFontHeadings(lines);
+  for (const line of lines) {
+    if (isSectionHeading(line.text)) line.heading = true;
+  }
+  const bands: VisualLine[][] = [];
+  for (const line of lines) {
+    const band = bands[bands.length - 1];
+    const previous = band?.[band.length - 1];
+    if (band && previous && previous.y - line.y <= imageBandGap) band.push(line);
+    else bands.push([line]);
+  }
+  return bands.flatMap((band) => {
+    const lesson = band.some((line) => line.heading || isProseLine(line.text));
+    if (!lesson) return [];
+    return band.filter((line) => line.heading || !isPageNoise(line.text));
+  });
+}
+
+function markFontHeadings(lines: VisualLine[]): void {
+  const samples = lines.filter((line) => line.text.length >= 40 && line.size > 0).map((line) => line.size);
+  const pool = samples.length > 0 ? samples : lines.map((line) => line.size).filter((size) => size > 0);
+  if (pool.length === 0) return;
+  const sorted = [...pool].sort((left, right) => left - right);
+  const median = sorted[Math.floor(sorted.length / 2)] ?? 0;
+  if (median <= 0) return;
+  for (const line of lines) {
+    if (line.size >= median * 1.25 && line.text.length <= 80 && !/[.!?。？！]$/.test(line.text)) {
+      line.heading = true;
+    }
+  }
+}
+
+function isProseLine(text: string): boolean {
+  const trimmed = text.trim();
+  const words = trimmed.split(/\s+/).filter((word) => /[A-Za-z\u4e00-\u9fff]{2,}/.test(word));
+  if (trimmed.length >= 80 || words.length >= 5) return true;
+  return words.length >= 2 && /[.!?。？！]$/.test(trimmed);
+}
+
+function isPageNoise(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return true;
+  return trimmed.length <= 4 && !/[A-Za-z\u4e00-\u9fff]{3,}/.test(trimmed);
 }
 
 function paragraphsFromLines(lines: VisualLine[]): string[] {
@@ -158,9 +214,11 @@ function paragraphsFromLines(lines: VisualLine[]): string[] {
     const previousLong = (previous?.text.length ?? 0) > 60;
     const indented = previous ? line.x > previous.x + 16 : false;
     const unfinished = previous ? !/[.!?。？！]$/.test(previous.text) : false;
+    const headingBreak = line.heading || previous?.heading === true;
     const join =
       previous !== null &&
       !bullet &&
+      !headingBreak &&
       gap > 0 &&
       ((gap <= 17 && (indented || previousLong)) ||
         (gap <= 22 && indented) ||
@@ -186,7 +244,8 @@ function joinParagraphPages(pages: string[][]): string {
   for (const page of pages) {
     if (page.length === 0) continue;
     const last = paragraphs[paragraphs.length - 1];
-    if (last && !/[.!?。？！]$/.test(last)) {
+    const next = page[0] ?? "";
+    if (last && !/[.!?。？！]$/.test(last) && !isSectionHeading(last) && !isSectionHeading(next)) {
       paragraphs[paragraphs.length - 1] = joinLines(last, page[0]);
       paragraphs.push(...page.slice(1));
     } else {

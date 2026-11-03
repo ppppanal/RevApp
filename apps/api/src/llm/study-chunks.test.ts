@@ -26,6 +26,29 @@ describe("studyChunks", () => {
     expect(fitted[0]).toContain("B".repeat(1_500));
   });
 
+  it("keeps a section heading with the following text and drops image-only fragments", () => {
+    const heading = "2.1 DOS Debugger";
+    const intro = `The first lesson explains the CPU. ${"a".repeat(3_900)}`;
+    const later = `The debugger shows registers and memory. ${"b".repeat(3_900)}`;
+    const chunks = studyChunks(
+      `${intro}\n\nFig. 2 DEBUG screen\n\n4A FF 00 11 22 33 44 55 66 77\n\n${heading}\n\n${later}`,
+    );
+    const joined = chunks.join("\n");
+    expect(joined).not.toContain("Fig.");
+    expect(joined).not.toContain("4A FF");
+    expect(joined).toContain(heading);
+    expect(joined).toContain("The debugger shows registers and memory.");
+    for (const chunk of chunks) {
+      if (chunk.includes("2.1") || chunk.includes("DOS Debugger")) {
+        expect(chunk).toContain(heading);
+        expect(chunk).toContain("The debugger shows registers and memory.");
+      }
+      expect(chunk.slice(0, heading.length) === heading || !chunk.includes(heading) || chunk.includes(`${heading}\n\n`)).toBe(
+        true,
+      );
+    }
+  });
+
   it("cuts a paragraph that is longer than one chunk", () => {
     const chunks = studyChunks("word ".repeat(2_000));
     expect(chunks.length).toBeGreaterThan(1);

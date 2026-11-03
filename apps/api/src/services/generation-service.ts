@@ -73,7 +73,7 @@ export class StudyGenerationService {
     for (const chunk of studyChunks(cleanedText)) {
       packs.push(await this.generateChunk(chunk));
     }
-    if (packs.length === 0) return paragraphRevisionPack(cleanedText);
+    if (packs.length === 0) return paragraphRevisionPack("");
     return mergeStudyPacks(packs);
   }
 

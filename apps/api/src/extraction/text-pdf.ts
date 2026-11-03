@@ -3,7 +3,33 @@ function escapePdfText(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
 }
 
+export interface PdfGlyph {
+  text: string;
+  x: number;
+  y: number;
+  size?: number;
+}
+
+export function layoutPdf(pages: PdfGlyph[][]): Uint8Array {
+  return textPdfPages(
+    pages.map((page) =>
+      page
+        .filter((glyph) => glyph.text.length > 0)
+        .map((glyph) => {
+          const size = glyph.size ?? 12;
+          return `BT /F1 ${size} Tf 1 0 0 1 ${glyph.x} ${glyph.y} Tm (${escapePdfText(glyph.text)}) Tj ET`;
+        })
+        .join("\n"),
+    ),
+  );
+}
+
 export function textPdf(lines: string[]): Uint8Array {
+  return layoutPdf(lines.map((line) => (line ? [{ text: line, x: 72, y: 720, size: 18 }] : [])));
+}
+
+function textPdfPages(streams: string[]): Uint8Array {
+  const lines = streams;
   const fontObjectNumber = 3 + lines.length * 2;
   const kids = lines.map((_, index) => `${3 + index * 2} 0 R`).join(" ");
   const objects = [
@@ -12,7 +38,7 @@ export function textPdf(lines: string[]): Uint8Array {
   ];
   lines.forEach((line, index) => {
     const contentNumber = 4 + index * 2;
-    const stream = line ? `BT /F1 18 Tf 72 720 Td (${escapePdfText(line)}) Tj ET` : "";
+    const stream = line;
     objects.push(
       `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents ${contentNumber} 0 R /Resources << /Font << /F1 ${fontObjectNumber} 0 R >> >> >>`,
     );

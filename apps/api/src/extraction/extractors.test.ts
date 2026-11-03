@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import { RoutingTextExtractor } from "./extractors";
 import { shutdownImageOcr } from "./image-ocr";
-import { textPdf } from "./text-pdf";
+import { layoutPdf, textPdf } from "./text-pdf";
 
 const fixture = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "fixtures/mitochondria.png"));
 
@@ -28,6 +28,26 @@ describe("RoutingTextExtractor", () => {
     expect(text).toContain("Mitochondria produce ATP.");
     expect(text).toContain("ATP is the energy currency.");
     expect(text).not.toContain("\t");
+  });
+
+  it("keeps a section heading with its paragraph and skips an image-only region", async () => {
+    const text = await extractor.extract({
+      kind: "pdf",
+      data: layoutPdf([
+        [
+          { text: "2.1 DOS Debugger", x: 72, y: 740, size: 24 },
+          { text: "The debugger shows registers and memory.", x: 72, y: 700, size: 12 },
+          { text: "AX", x: 72, y: 400, size: 12 },
+          { text: "FF", x: 400, y: 180, size: 12 },
+        ],
+        [{ text: "Fig. 2", x: 72, y: 400, size: 12 }],
+      ]),
+    });
+    expect(text.indexOf("2.1 DOS Debugger")).toBeGreaterThanOrEqual(0);
+    expect(text.indexOf("The debugger shows registers and memory.")).toBeGreaterThan(text.indexOf("2.1 DOS Debugger"));
+    expect(text).not.toContain("AX");
+    expect(text).not.toContain("FF");
+    expect(text).not.toContain("Fig.");
   });
 
   it("rejects a PDF with no text layer", async () => {
