@@ -34,21 +34,30 @@ export function pairedLinesFromText(text: string): PairedLine[] {
     .filter((line): line is PairedLine => line !== null);
 }
 
-const KANA = /[\u3040-\u30ff]/;
+const HIRAGANA = /[\u3041-\u3096]/;
+const KATAKANA = /[\u30a1-\u30fa\uff66-\uff9d]/;
+const KANA = /[\u3040-\u30ff\uff61-\uff9f]/;
 const KANJI = /[\u4e00-\u9fff]/;
 
 function isKanaReading(cell: string): boolean {
   return KANA.test(cell) && !KANJI.test(cell);
 }
 
-// Minna-style vocab rows are kana, then kanji, then a gloss. A row with no kanji column is skipped.
+function isKatakanaWord(cell: string): boolean {
+  return KATAKANA.test(cell) && !HIRAGANA.test(cell) && !KANJI.test(cell);
+}
+
+// Minna-style vocab rows are kana, then kanji, then a gloss. Katakana is a reading, the same as hiragana.
+// A katakana word with no kanji spelling still becomes a card. The Chinese gloss is not written on it.
 export function kanaKanjiCards(text: string): Array<{ question: string; answer: string }> | null {
   const rows = text
     .split(/\n/)
     .map((line) => line.split("\t").map((cell) => cell.trim()).filter((cell) => cell.length > 0));
   const cards = rows.flatMap((cells) => {
-    if (cells.length < 3 || !isKanaReading(cells[0]) || !KANJI.test(cells[1])) return [];
-    return [{ question: cells[1], answer: cells[0] }];
+    if (!isKanaReading(cells[0])) return [];
+    if (cells.length >= 3 && KANJI.test(cells[1])) return [{ question: cells[1], answer: cells[0] }];
+    if (cells.length >= 2 && isKatakanaWord(cells[0])) return [{ question: cells[0], answer: cells[0] }];
+    return [];
   });
   if (cards.length === 0) return null;
   return cards;

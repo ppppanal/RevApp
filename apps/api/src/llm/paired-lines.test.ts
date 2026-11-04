@@ -64,4 +64,16 @@ describe("paired lines", () => {
     ]);
     expect(localRevisionPack(text).flashcards).toEqual(kanaKanjiCards(text));
   });
+
+  it("treats a katakana reading like hiragana and leaves the Chinese gloss off the card", () => {
+    const text = ["アメリカ\t美國", "コーヒー\t珈琲\t咖啡", "わたし\t我"].join("\n");
+    const cards = kanaKanjiCards(text);
+    expect(cards).toEqual([
+      { question: "アメリカ", answer: "アメリカ" },
+      { question: "珈琲", answer: "コーヒー" },
+    ]);
+    expect(cards?.some((card) => card.question.includes("美國") || card.answer.includes("美國"))).toBe(false);
+    expect(cards?.some((card) => card.question.includes("咖啡") || card.answer.includes("咖啡"))).toBe(false);
+    expect(cards?.some((card) => card.question === "我" || card.answer === "我")).toBe(false);
+  });
 });
