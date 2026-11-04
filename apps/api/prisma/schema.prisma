@@ -3,19 +3,23 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 model User {
-  id        String    @id @default(cuid())
-  email     String    @unique
-  name      String?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  subjects  Subject[]
-  notes     Note[]
-  tags      Tag[]
+  id           String    @id @default(cuid())
+  email        String?   @unique
+  username     String?   @unique
+  passwordHash String?
+  name         String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  subjects     Subject[]
+  notes        Note[]
+  tags         Tag[]
+  cardScores   CardScore[]
 }
 
 model Subject {
@@ -61,6 +65,7 @@ model SourceFile {
   kind          SourceKind
   filename      String?
   mimeType      String?
+  storageKey    String?
   extractedText String?
   createdAt     DateTime   @default(now())
 
@@ -89,11 +94,29 @@ model Flashcard {
   answer    String
   position  Int
   edited    Boolean  @default(false)
+  personal  Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  scores    CardScore[]
 
   @@unique([noteId, position])
   @@index([noteId])
+}
+
+model CardScore {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  flashcardId String
+  flashcard   Flashcard @relation(fields: [flashcardId], references: [id], onDelete: Cascade)
+  correct     Int       @default(0)
+  incorrect   Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([userId, flashcardId])
+  @@index([userId])
+  @@index([flashcardId])
 }
 
 model Tag {

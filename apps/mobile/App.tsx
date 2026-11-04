@@ -3,13 +3,15 @@ import { useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { CreateNoteScreen } from "./src/screens/CreateNoteScreen";
 import { NoteScreen } from "./src/screens/NoteScreen";
+import { QuizScreen } from "./src/screens/QuizScreen";
 import { StudyScreen } from "./src/screens/StudyScreen";
 import { colors } from "./src/theme";
 
 type Route =
   | { name: "home" }
   | { name: "note"; noteId: string }
-  | { name: "study"; noteId: string; index: number };
+  | { name: "study"; noteId: string; index: number }
+  | { name: "quiz"; noteId: string };
 
 export default function App() {
   const [route, setRoute] = useState<Route>({ name: "home" });
@@ -23,7 +25,11 @@ export default function App() {
           noteId={route.noteId}
           onBack={() => setRoute({ name: "home" })}
           onStudy={(index) => setRoute({ name: "study", noteId: route.noteId, index })}
+          onQuiz={() => setRoute({ name: "quiz", noteId: route.noteId })}
         />
+      ) : null}
+      {route.name === "quiz" ? (
+        <QuizScreen noteId={route.noteId} onBack={() => setRoute({ name: "note", noteId: route.noteId })} />
       ) : null}
       {route.name === "study" ? (
         <StudyScreen

@@ -1,6 +1,7 @@
 import type { CreateNoteRequest } from "@rev/shared";
 import { AppError } from "../errors";
 import type { CreateNoteCommand } from "../services/types";
+import { decodeUpload } from "./decode-upload";
 
 export function toCreateNoteCommand(input: CreateNoteRequest): CreateNoteCommand {
   const title = input.title;
@@ -9,13 +10,22 @@ export function toCreateNoteCommand(input: CreateNoteRequest): CreateNoteCommand
     return { title, subjectName, source: { kind: "text", text: input.source.text } };
   }
   if (input.source?.kind === "pdf") {
-    return { title, subjectName, source: { kind: "pdf", filename: input.source.filename } };
+    return {
+      title,
+      subjectName,
+      source: { kind: "pdf", filename: input.source.filename, data: decodeUpload(input.source.data, "PDF") },
+    };
   }
   if (input.source?.kind === "image") {
     return {
       title,
       subjectName,
-      source: { kind: "image", filename: input.source.filename, mimeType: input.source.mimeType },
+      source: {
+        kind: "image",
+        filename: input.source.filename,
+        mimeType: input.source.mimeType,
+        data: decodeUpload(input.source.data, "Image"),
+      },
     };
   }
   if (input.text) {

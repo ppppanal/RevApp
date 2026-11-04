@@ -21,10 +21,12 @@ export function NoteScreen({
   noteId,
   onBack,
   onStudy,
+  onQuiz,
 }: {
   noteId: string;
   onBack: () => void;
   onStudy: (index: number) => void;
+  onQuiz: () => void;
 }) {
   const [note, setNote] = useState<NoteResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -93,11 +95,18 @@ export function NoteScreen({
         ))}
         <Text style={styles.section}>Cards</Text>
         {note.flashcards.length > 0 ? (
-          <Button
-            label={`Study ${note.flashcards.length} ${note.flashcards.length === 1 ? "card" : "cards"}`}
-            onPress={() => onStudy(0)}
-            testID="open-study"
-          />
+          <View style={styles.actions}>
+            <View style={styles.action}>
+              <Button
+                label={`Study ${note.flashcards.length} ${note.flashcards.length === 1 ? "card" : "cards"}`}
+                onPress={() => onStudy(0)}
+                testID="open-study"
+              />
+            </View>
+            <View style={styles.action}>
+              <SecondaryButton label="Quiz" onPress={onQuiz} testID="open-quiz" />
+            </View>
+          </View>
         ) : (
           <Text style={styles.muted}>No cards yet.</Text>
         )}
@@ -118,6 +127,8 @@ const styles = StyleSheet.create({
   subject: { color: colors.accent, fontSize: 13, fontWeight: "700" },
   title: { color: colors.ink, fontSize: 28, fontWeight: "700", lineHeight: 34 },
   section: { color: colors.ink, fontSize: 18, fontWeight: "700" },
+  actions: { flexDirection: "row", gap: 10 },
+  action: { flex: 1 },
   card: {
     backgroundColor: colors.card,
     borderColor: colors.line,

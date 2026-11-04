@@ -1,24 +1,102 @@
-import { describe, expect, it } from "vitest";
-import { UnsupportedExtractionError } from "../errors";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterAll, describe, expect, it } from "vitest";
 import { RoutingTextExtractor } from "./extractors";
+import { shutdownImageOcr } from "./image-ocr";
+import { layoutPdf, textPdf } from "./text-pdf";
+
+const fixture = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "fixtures/mitochondria.png"));
 
 describe("RoutingTextExtractor", () => {
   const extractor = new RoutingTextExtractor();
+
+  afterAll(async () => {
+    await shutdownImageOcr();
+  });
 
   it("returns plain text unchanged", async () => {
     await expect(extractor.extract({ kind: "text", text: "  ATP  " })).resolves.toBe("  ATP  ");
   });
 
-  it("rejects PDF and image sources with a typed unsupported error", async () => {
-    await expect(extractor.extract({ kind: "pdf", filename: "notes.pdf" })).rejects.toMatchObject({
-      name: "UnsupportedExtractionError",
-      code: "UNSUPPORTED_SOURCE",
-      status: 501,
-      message: "PDF extraction is not available yet. Create a note from plain text.",
+  it("extracts a text layer from a PDF", async () => {
+    const text = await extractor.extract({
+      kind: "pdf",
+      filename: "cells.pdf",
+      data: textPdf(["Mitochondria produce ATP.", "ATP is the energy currency."]),
     });
-    await expect(extractor.extract({ kind: "image", mimeType: "image/png" })).rejects.toBeInstanceOf(
-      UnsupportedExtractionError,
-    );
-    await expect(extractor.extract({ kind: "image" })).rejects.toThrow(/Image extraction is not available yet/);
+    expect(text).toContain("Mitochondria produce ATP.");
+    expect(text).toContain("ATP is the energy currency.");
+    expect(text).not.toContain("\t");
+  });
+
+  it("keeps a section heading with its paragraph and skips an image-only region", async () => {
+    const text = await extractor.extract({
+      kind: "pdf",
+      data: layoutPdf([
+        [
+          { text: "2.1 DOS Debugger", x: 72, y: 740, size: 24 },
+          { text: "The debugger shows registers and memory.", x: 72, y: 700, size: 12 },
+          { text: "AX", x: 72, y: 400, size: 12 },
+          { text: "FF", x: 400, y: 180, size: 12 },
+        ],
+        [{ text: "Fig. 2", x: 72, y: 400, size: 12 }],
+      ]),
+    });
+    expect(text.indexOf("2.1 DOS Debugger")).toBeGreaterThanOrEqual(0);
+    expect(text.indexOf("The debugger shows registers and memory.")).toBeGreaterThan(text.indexOf("2.1 DOS Debugger"));
+    expect(text).not.toContain("AX");
+    expect(text).not.toContain("FF");
+    expect(text).not.toContain("Fig.");
+  });
+
+  it("rejects a PDF with no text layer", async () => {
+    await expect(extractor.extract({ kind: "pdf", data: textPdf([""]) })).rejects.toMatchObject({
+      code: "EMPTY_TEXT",
+      status: 400,
+      message: "This PDF has no selectable text. Scanned PDFs are not supported.",
+    });
+  });
+
+  it("rejects a file that is not a PDF", async () => {
+    await expect(extractor.extract({ kind: "pdf", data: new Uint8Array(Buffer.from("hello")) })).rejects.toMatchObject({
+      code: "VALIDATION",
+      message: "This file is not a PDF.",
+    });
+  });
+
+  it("rejects a PDF that cannot be parsed", async () => {
+    await expect(
+      extractor.extract({ kind: "pdf", data: new Uint8Array(Buffer.from("%PDF-1.4\ngarbage")) }),
+    ).rejects.toMatchObject({
+      code: "EXTRACTION_FAILED",
+      status: 422,
+    });
+  });
+
+  it("rejects a PDF with too many pages", async () => {
+    await expect(extractor.extract({ kind: "pdf", data: textPdf(Array.from({ length: 51 }, () => "Hi")) })).rejects.toMatchObject({
+      code: "VALIDATION",
+      message: /51 pages/,
+    });
+  });
+
+  it("reads English text from an image", async () => {
+    const text = await extractor.extract({
+      kind: "image",
+      filename: "notes.png",
+      mimeType: "image/png",
+      data: new Uint8Array(fixture),
+    });
+    expect(text).toContain("Mitochondria produce ATP");
+  }, 30_000);
+
+  it("rejects a file that is not an image", async () => {
+    await expect(
+      extractor.extract({ kind: "image", mimeType: "image/png", data: new Uint8Array(Buffer.from("hello")) }),
+    ).rejects.toMatchObject({
+      code: "VALIDATION",
+      message: /PNG, JPEG/,
+    });
   });
 });

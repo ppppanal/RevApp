@@ -65,6 +65,7 @@ export class FlashcardService implements FlashcardApi {
       answer: updated.answer,
       position: updated.position,
       edited: updated.edited,
+      personal: updated.personal,
     };
   }
 }

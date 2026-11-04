@@ -6,11 +6,14 @@ import request from "supertest";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createApp, type AppServices } from "./app";
 import { RoutingTextExtractor } from "./extraction/extractors";
+import { shutdownImageOcr } from "./extraction/image-ocr";
+import { textPdf } from "./extraction/text-pdf";
 import type { ChatMessage, LlmCompletionOptions, LlmProvider } from "./llm/provider";
 import { FlashcardService } from "./services/flashcard-service";
 import { StudyGenerationService } from "./services/generation-service";
 import { NoteService } from "./services/note-service";
 import { resolveDevUser } from "./services/dev-user";
+import { MemoryObjectStore } from "./storage/memory-store";
 import { cleanNoteText } from "./text/clean-text";
 
 const integrationEnabled = process.env.REV_INTEGRATION === "1";
@@ -50,11 +53,12 @@ class StaticProvider implements LlmProvider {
 describe.skipIf(!integrationEnabled)("text path", () => {
   let prisma: PrismaClient;
   const provider = new StaticProvider([JSON.stringify(studyPack)]);
+  const files = new MemoryObjectStore();
 
   beforeAll(() => {
     execFileSync("npx", ["prisma", "migrate", "deploy"], {
       cwd: resolve(dirname(fileURLToPath(import.meta.url)), ".."),
-      env: { ...process.env, DATABASE_URL: databaseUrl },
+      env: { ...process.env, DATABASE_URL: databaseUrl, DIRECT_URL: databaseUrl },
       stdio: "inherit",
     });
     prisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
@@ -64,10 +68,12 @@ describe.skipIf(!integrationEnabled)("text path", () => {
     provider.calls = 0;
     provider.messages = [];
     provider.results = [JSON.stringify(studyPack)];
+    files.objects.clear();
     await prisma.user.deleteMany({ where: { email } });
   });
 
   afterAll(async () => {
+    await shutdownImageOcr();
     if (!prisma) return;
     await prisma.user.deleteMany({ where: { email } });
     await prisma.$disconnect();
@@ -75,7 +81,7 @@ describe.skipIf(!integrationEnabled)("text path", () => {
 
   function services(active: LlmProvider): AppServices {
     return {
-      notes: new NoteService(prisma, new RoutingTextExtractor(), new StudyGenerationService(active, 1000)),
+      notes: new NoteService(prisma, new RoutingTextExtractor(), new StudyGenerationService(active, 1000), files),
       flashcards: new FlashcardService(prisma),
       resolveUser: () => resolveDevUser(prisma, email),
     };
@@ -111,6 +117,7 @@ describe.skipIf(!integrationEnabled)("text path", () => {
     expect(stored.rawText).toBe(raw.replace(/\u0000/g, ""));
     expect(stored.rawText).not.toContain("\u0000");
     expect(stored.sourceFiles[0]?.kind).toBe("TEXT");
+    expect(stored.sourceFiles[0]?.storageKey).toBeNull();
     expect(stored.keyPoints).toHaveLength(2);
     expect(stored.flashcards).toHaveLength(2);
 
@@ -154,14 +161,42 @@ describe.skipIf(!integrationEnabled)("text path", () => {
     expect(failed.summary).toBeNull();
   });
 
-  it("returns the unsupported extraction error for PDF and image sources", async () => {
+  it("rejects a PDF or image that does not include a file", async () => {
     const api = createApp(services(provider));
-    const pdf = await request(api).post("/notes").send({ source: { kind: "pdf" } }).expect(501);
-    const image = await request(api).post("/notes").send({ source: { kind: "image" } }).expect(501);
-    expect(pdf.body.error.message).toMatch(/PDF extraction is not available yet/);
-    expect(image.body.error.message).toMatch(/Image extraction is not available yet/);
+    const pdf = await request(api).post("/notes").send({ source: { kind: "pdf" } }).expect(400);
+    const image = await request(api).post("/notes").send({ source: { kind: "image" } }).expect(400);
+    expect(pdf.body.error.code).toBe("VALIDATION");
+    expect(pdf.body.error.message).toMatch(/Attach a PDF file/);
+    expect(image.body.error.message).toMatch(/Attach an image/);
     expect(provider.calls).toBe(0);
     expect(await prisma.note.count({ where: { user: { email } } })).toBe(0);
+  });
+
+  it("creates a note from a PDF text layer", async () => {
+    const api = createApp(services(provider));
+    const created = await request(api)
+      .post("/notes")
+      .send({
+        title: "Cells",
+        source: {
+          kind: "pdf",
+          filename: "cells.pdf",
+          data: Buffer.from(textPdf(["Mitochondria produce ATP."])).toString("base64"),
+        },
+      })
+      .expect(201);
+    expect(created.body.title).toBe("Cells");
+    expect(provider.calls).toBe(1);
+    expect(provider.messages[0]?.[1]?.content).toContain("Mitochondria produce ATP.");
+    const stored = await prisma.note.findUniqueOrThrow({
+      where: { id: created.body.id },
+      include: { sourceFiles: true },
+    });
+    expect(stored.sourceFiles[0]).toMatchObject({ kind: "PDF", filename: "cells.pdf", mimeType: "application/pdf" });
+    expect(stored.sourceFiles[0]?.storageKey).toMatch(/\/cells\.pdf$/);
+    const saved = files.objects.get(stored.sourceFiles[0]?.storageKey ?? "");
+    expect(saved?.contentType).toBe("application/pdf");
+    expect(saved?.body.byteLength).toBeGreaterThan(0);
   });
 
   it("hides another user's flashcard", async () => {
