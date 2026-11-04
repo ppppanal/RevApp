@@ -48,12 +48,71 @@ def installed_tesseract_languages() -> set[str]:
         return set()
 
 
+_KANA_READINGS = {
+    "ア": frozenset({"a"}),
+    "イ": frozenset({"i"}),
+    "ウ": frozenset({"u"}),
+    "エ": frozenset({"e"}),
+    "オ": frozenset({"o"}),
+    "カ": frozenset({"ka"}),
+    "キ": frozenset({"ki"}),
+    "ク": frozenset({"ku"}),
+    "ケ": frozenset({"ke"}),
+    "コ": frozenset({"ko"}),
+    "サ": frozenset({"sa"}),
+    "シ": frozenset({"shi", "si"}),
+    "ス": frozenset({"su"}),
+    "セ": frozenset({"se"}),
+    "ソ": frozenset({"so"}),
+    "タ": frozenset({"ta"}),
+    "チ": frozenset({"chi", "ti"}),
+    "ツ": frozenset({"tsu", "tu"}),
+    "テ": frozenset({"te"}),
+    "ト": frozenset({"to"}),
+    "ナ": frozenset({"na"}),
+    "ニ": frozenset({"ni"}),
+    "ヌ": frozenset({"nu"}),
+    "ネ": frozenset({"ne"}),
+    "ノ": frozenset({"no"}),
+    "ハ": frozenset({"ha"}),
+    "ヒ": frozenset({"hi"}),
+    "フ": frozenset({"fu", "hu"}),
+    "ヘ": frozenset({"he"}),
+    "ホ": frozenset({"ho"}),
+    "マ": frozenset({"ma"}),
+    "ミ": frozenset({"mi"}),
+    "ム": frozenset({"mu"}),
+    "メ": frozenset({"me"}),
+    "モ": frozenset({"mo"}),
+    "ヤ": frozenset({"ya"}),
+    "ユ": frozenset({"yu"}),
+    "ヨ": frozenset({"yo"}),
+    "ラ": frozenset({"ra"}),
+    "リ": frozenset({"ri"}),
+    "ル": frozenset({"ru"}),
+    "レ": frozenset({"re"}),
+    "ロ": frozenset({"ro"}),
+    "ワ": frozenset({"wa"}),
+    "ヲ": frozenset({"wo", "o"}),
+    "ン": frozenset({"n"}),
+}
+
+
+def clean_chart_pair_count(text: str) -> int:
+    seen: set[str] = set()
+    for kana, romaji in re.findall(r"([ァ-ヶ])[ \t]*([A-Za-z]{1,4})(?![A-Za-z])", text):
+        if kana in seen:
+            continue
+        if romaji.lower() in _KANA_READINGS.get(kana, frozenset()):
+            seen.add(kana)
+    return len(seen)
+
+
 def chart_reading_is_incomplete(text: str) -> bool:
-    """A katakana chart that was not read as character plus romaji still needs the image OCR path."""
-    pairs = re.findall(r"[ァ-ヶー][ \t]*[A-Za-z]{1,3}(?![A-Za-z])", text)
-    if len(pairs) >= 5:
+    """A page read that still contains kana, or only short Latin noise, needs the per-cell image path."""
+    if clean_chart_pair_count(text) >= 5:
         return False
-    if len(re.findall(r"[ァ-ヶー]", text)) >= 5:
+    if re.search(r"[ァ-ヶー]", text):
         return True
     words = [word for word in text.split() if word]
     has_long_word = any(re.search(r"[A-Za-z]{6,}", word) for word in words)

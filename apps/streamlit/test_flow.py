@@ -79,6 +79,19 @@ class FlowTests(unittest.TestCase):
         self.assertNotIn("extractedText", payload)
         self.assertIn("dataBase64", payload["source"])
 
+    def test_mixed_page_ocr_sends_the_image_to_the_cell_reader(self) -> None:
+        text = "FT a Fy ka サ sa\nシン shi\nオ s ゴ ko Y so"
+        payload = build_study_payload(
+            filename="kana.jpg",
+            mime_type="image/jpeg",
+            data=b"jpg",
+            installed_langs={"eng", "chi_sim", "jpn"},
+            ocr=lambda _data: text,
+        )
+        self.assertTrue(chart_reading_is_incomplete(text))
+        self.assertNotIn("extractedText", payload)
+        self.assertIn("dataBase64", payload["source"])
+
     def test_read_katakana_chart_stays_in_process(self) -> None:
         text = "\n".join(["ア a", "イ i", "ウ u", "エ e", "オ o"])
         payload = build_study_payload(

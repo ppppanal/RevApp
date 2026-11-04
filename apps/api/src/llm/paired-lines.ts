@@ -63,23 +63,81 @@ export function kanaKanjiCards(text: string): Array<{ question: string; answer: 
   return cards;
 }
 
-const CHART_CELL = /([ァ-ヶ])[ \t]*([A-Za-z]{1,3})(?![A-Za-z])/g;
+const CHART_CELL = /([ァ-ヶ])[ \t]*([A-Za-z]{1,4})(?![A-Za-z])/g;
 const CHART_PAIR_MINIMUM = 5;
 
-// A katakana chart cell is one character and a romaji reading, such as ア a or シ shi.
-// One or two accidental pairs stay on the normal note path.
+const KANA_READING: Record<string, readonly string[]> = {
+  ア: ["a"],
+  イ: ["i"],
+  ウ: ["u"],
+  エ: ["e"],
+  オ: ["o"],
+  カ: ["ka"],
+  キ: ["ki"],
+  ク: ["ku"],
+  ケ: ["ke"],
+  コ: ["ko"],
+  サ: ["sa"],
+  シ: ["shi", "si"],
+  ス: ["su"],
+  セ: ["se"],
+  ソ: ["so"],
+  タ: ["ta"],
+  チ: ["chi", "ti"],
+  ツ: ["tsu", "tu"],
+  テ: ["te"],
+  ト: ["to"],
+  ナ: ["na"],
+  ニ: ["ni"],
+  ヌ: ["nu"],
+  ネ: ["ne"],
+  ノ: ["no"],
+  ハ: ["ha"],
+  ヒ: ["hi"],
+  フ: ["fu", "hu"],
+  ヘ: ["he"],
+  ホ: ["ho"],
+  マ: ["ma"],
+  ミ: ["mi"],
+  ム: ["mu"],
+  メ: ["me"],
+  モ: ["mo"],
+  ヤ: ["ya"],
+  ユ: ["yu"],
+  ヨ: ["yo"],
+  ラ: ["ra"],
+  リ: ["ri"],
+  ル: ["ru"],
+  レ: ["re"],
+  ロ: ["ro"],
+  ワ: ["wa"],
+  ヲ: ["wo", "o"],
+  ン: ["n"],
+};
+
+function isChartPageText(text: string): boolean {
+  if (/[ぁ-ん]/.test(text) || /[一-龯]/.test(text)) return false;
+  if (/[ァ-ヶ]{3,}/.test(text)) return false;
+  if (/[A-Za-z]{8,}/.test(text)) return false;
+  return (text.match(/[ァ-ヶ]/g) ?? []).length >= 5;
+}
+
+// A katakana chart cell is one character and its romaji, such as ア a or カ ka.
+// A page read that mixes those pairs with Latin noise still keeps the clean pairs.
 export function katakanaChartCards(text: string): Array<{ question: string; answer: string }> | null {
   const cards: Array<{ question: string; answer: string }> = [];
   const seen = new Set<string>();
   for (const match of text.matchAll(new RegExp(CHART_CELL.source, "g"))) {
     const question = match[1] ?? "";
     const answer = (match[2] ?? "").toLowerCase();
-    if (!question || seen.has(question)) continue;
+    const readings = KANA_READING[question];
+    if (!readings || !readings.includes(answer) || seen.has(question)) continue;
     seen.add(question);
     cards.push({ question, answer });
   }
-  if (cards.length < CHART_PAIR_MINIMUM) return null;
-  return cards;
+  if (cards.length >= CHART_PAIR_MINIMUM) return cards;
+  if (cards.length >= 1 && isChartPageText(text)) return cards;
+  return null;
 }
 
 function clip(text: string, max: number): string {
@@ -150,12 +208,7 @@ function lineRevisionPack(pairs: PairedLine[]): StudyPack {
 function chartRevisionPack(cards: Array<{ question: string; answer: string }>): StudyPack {
   return {
     summary: "Revision cards from a katakana chart.",
-    keyPoints: [
-      {
-        kind: "FACT",
-        content: "Each card is a katakana character and its romaji reading.",
-      },
-    ],
+    keyPoints: [],
     flashcards: cards,
   };
 }

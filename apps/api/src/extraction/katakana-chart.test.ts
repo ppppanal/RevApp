@@ -6,6 +6,7 @@ describe("katakana chart detection", () => {
     const dropped = "Ta Ai Ju Te Fo\nHa Fu Tw Hk dk\nPsa Ushi Asu Ese Vso\nHta Fi Visu Tt Pt";
     expect(shouldTryKatakanaChart(dropped)).toBe(true);
     expect(shouldTryKatakanaChart("ア a イ i ウ u エ e オ o")).toBe(true);
+    expect(shouldTryKatakanaChart("FT a Fy ka サ sa")).toBe(true);
   });
 
   it("leaves an English note on the normal image read", () => {

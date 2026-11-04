@@ -245,5 +245,6 @@ describe("StudyGenerationService", () => {
       { question: "ツ", answer: "tsu" },
       { question: "ン", answer: "n" },
     ]);
+    expect(chartPack.keyPoints).toEqual([]);
   });
 });

@@ -13,9 +13,9 @@ const LETTERS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 type OcrWorker = Awaited<ReturnType<typeof tesseract.createWorker>>;
 type Box = { left: number; top: number; width: number; height: number };
 
-// A full-page English read of a kana chart comes back as short Latin tokens and drops the cells.
+// A page read of a kana chart is Latin noise, sometimes with only a few kana left in it.
 export function shouldTryKatakanaChart(text: string): boolean {
-  if ((text.match(/[ァ-ヶー]/g) ?? []).length >= 5) return true;
+  if (/[ァ-ヶー]/.test(text)) return true;
   const words = text.split(/\s+/).filter((word) => word.length > 0);
   const hasLongWord = words.some((word) => /[A-Za-z]{6,}/.test(word));
   return !hasLongWord && words.length >= 12;
@@ -29,7 +29,7 @@ export async function readKatakanaChart(data: Uint8Array): Promise<string | null
     const tsv = (await segmenter.recognize(image, {}, { tsv: true })).data.tsv ?? "";
     const { page, words } = parseWords(tsv);
     const cells = cellsOf(words, page);
-    if (cells.length < 12) return null;
+    if (cells.length < 5) return null;
     const kanaWorker = await openWorker("jpn", tesseract.OEM.TESSERACT_ONLY, japanese.langPath, japanese.gzip !== false);
     const latinWorker = await openWorker("eng", tesseract.OEM.LSTM_ONLY, english.langPath, english.gzip !== false);
     try {
@@ -91,7 +91,7 @@ function bands(centers: number[], gap: number): Array<{ start: number; end: numb
 }
 
 function cellsOf(words: Box[], page: Box): Array<{ box: Box; boxes: Box[] }> {
-  if (page.width < 1 || page.height < 1 || words.length < 12) return [];
+  if (page.width < 1 || page.height < 1 || words.length < 8) return [];
   const rowBands = bands(
     words.map((word) => word.top + word.height / 2),
     22,
@@ -100,7 +100,7 @@ function cellsOf(words: Box[], page: Box): Array<{ box: Box; boxes: Box[] }> {
     words.map((word) => word.left + word.width / 2),
     48,
   );
-  if (rowBands.length < 4 || columnBands.length < 3) return [];
+  if (rowBands.length < 4 || columnBands.length < 1) return [];
   const cells: Array<{ box: Box; boxes: Box[] }> = [];
   for (const row of rowBands) {
     const rowWords = words.filter((word) => {

@@ -87,8 +87,19 @@ describe("paired lines", () => {
       { question: "ツ", answer: "tsu" },
       { question: "ン", answer: "n" },
     ]);
-    expect(localRevisionPack(text).flashcards).toEqual(katakanaChartCards(text));
+    const pack = localRevisionPack(text);
+    expect(pack.flashcards).toEqual(katakanaChartCards(text));
+    expect(pack.keyPoints).toEqual([]);
     expect(katakanaChartCards("ア a\nイ i\nウ u\nエ e")).toBeNull();
     expect(katakanaChartCards("The カ is a syllable in シ shi, not a chart.")).toBeNull();
+  });
+
+  it("keeps a clean pair from a noisy page read and does not save those lines as key points", () => {
+    const text = ["FT a Fy ka サ sa", "シン shi", "オ s ゴ ko Y so"].join("\n");
+    const pack = localRevisionPack(text);
+    expect(pack.flashcards).toEqual([{ question: "サ", answer: "sa" }]);
+    expect(pack.keyPoints).toEqual([]);
+    expect(JSON.stringify(pack)).not.toContain("FT a");
+    expect(JSON.stringify(pack)).not.toContain("FACT");
   });
 });
