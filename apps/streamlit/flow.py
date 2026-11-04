@@ -48,6 +48,18 @@ def installed_tesseract_languages() -> set[str]:
         return set()
 
 
+def chart_reading_is_incomplete(text: str) -> bool:
+    """A katakana chart that was not read as character plus romaji still needs the image OCR path."""
+    pairs = re.findall(r"[ァ-ヶー][ \t]*[A-Za-z]{1,3}(?![A-Za-z])", text)
+    if len(pairs) >= 5:
+        return False
+    if len(re.findall(r"[ァ-ヶー]", text)) >= 5:
+        return True
+    words = [word for word in text.split() if word]
+    has_long_word = any(re.search(r"[A-Za-z]{6,}", word) for word in words)
+    return not has_long_word and len(words) >= 12
+
+
 def ocr_image(data: bytes) -> str:
     import io
 
@@ -102,9 +114,11 @@ def build_study_payload(
     if kind == "image" and not missing_ocr_languages(langs):
         reader = ocr or ocr_image
         try:
-            payload["extractedText"] = reader(data)
-            payload["source"] = source
-            return payload
+            extracted = reader(data)
+            if extracted and not chart_reading_is_incomplete(extracted):
+                payload["extractedText"] = extracted
+                payload["source"] = source
+                return payload
         except Exception:
             pass
     source["dataBase64"] = base64.b64encode(data).decode("ascii")

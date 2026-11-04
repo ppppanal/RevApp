@@ -2,7 +2,15 @@ import json
 import unittest
 from pathlib import Path
 
-from flow import StudyError, StudySession, build_study_payload, is_admin_login, missing_ocr_languages, redact
+from flow import (
+    StudyError,
+    StudySession,
+    build_study_payload,
+    chart_reading_is_incomplete,
+    is_admin_login,
+    missing_ocr_languages,
+    redact,
+)
 
 
 class FlowTests(unittest.TestCase):
@@ -58,6 +66,31 @@ class FlowTests(unittest.TestCase):
         )
         self.assertNotIn("extractedText", payload)
         self.assertIn("dataBase64", payload["source"])
+
+    def test_katakana_chart_without_readings_uses_the_image_path(self) -> None:
+        payload = build_study_payload(
+            filename="kana.jpg",
+            mime_type="image/jpeg",
+            data=b"jpg",
+            installed_langs={"eng", "chi_sim", "jpn"},
+            ocr=lambda _data: "ア イ ウ エ オ カ キ ク",
+        )
+        self.assertTrue(chart_reading_is_incomplete("ア イ ウ エ オ カ キ ク"))
+        self.assertNotIn("extractedText", payload)
+        self.assertIn("dataBase64", payload["source"])
+
+    def test_read_katakana_chart_stays_in_process(self) -> None:
+        text = "\n".join(["ア a", "イ i", "ウ u", "エ e", "オ o"])
+        payload = build_study_payload(
+            filename="kana.jpg",
+            mime_type="image/jpeg",
+            data=b"jpg",
+            installed_langs={"eng", "chi_sim", "jpn"},
+            ocr=lambda _data: text,
+        )
+        self.assertFalse(chart_reading_is_incomplete(text))
+        self.assertEqual(payload["extractedText"], text)
+        self.assertNotIn("dataBase64", payload["source"])
 
     def test_pdf_keeps_bytes_for_existing_extractor(self) -> None:
         payload = build_study_payload(

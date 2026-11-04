@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { AppError } from "../errors";
 import {
   kanaKanjiCards,
+  katakanaChartCards,
   localRevisionPack,
   NO_PARAGRAPHS_MESSAGE,
   paragraphRevisionPack,
@@ -75,5 +76,19 @@ describe("paired lines", () => {
     expect(cards?.some((card) => card.question.includes("美國") || card.answer.includes("美國"))).toBe(false);
     expect(cards?.some((card) => card.question.includes("咖啡") || card.answer.includes("咖啡"))).toBe(false);
     expect(cards?.some((card) => card.question === "我" || card.answer === "我")).toBe(false);
+  });
+
+  it("builds one card per katakana chart cell and skips a short note", () => {
+    const text = ["ア a", "カ ka", "シ shi", "ツ tsu", "ン n"].join("\n");
+    expect(katakanaChartCards(text)).toEqual([
+      { question: "ア", answer: "a" },
+      { question: "カ", answer: "ka" },
+      { question: "シ", answer: "shi" },
+      { question: "ツ", answer: "tsu" },
+      { question: "ン", answer: "n" },
+    ]);
+    expect(localRevisionPack(text).flashcards).toEqual(katakanaChartCards(text));
+    expect(katakanaChartCards("ア a\nイ i\nウ u\nエ e")).toBeNull();
+    expect(katakanaChartCards("The カ is a syllable in シ shi, not a chart.")).toBeNull();
   });
 });

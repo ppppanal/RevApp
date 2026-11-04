@@ -63,6 +63,25 @@ export function kanaKanjiCards(text: string): Array<{ question: string; answer: 
   return cards;
 }
 
+const CHART_CELL = /([ァ-ヶ])[ \t]*([A-Za-z]{1,3})(?![A-Za-z])/g;
+const CHART_PAIR_MINIMUM = 5;
+
+// A katakana chart cell is one character and a romaji reading, such as ア a or シ shi.
+// One or two accidental pairs stay on the normal note path.
+export function katakanaChartCards(text: string): Array<{ question: string; answer: string }> | null {
+  const cards: Array<{ question: string; answer: string }> = [];
+  const seen = new Set<string>();
+  for (const match of text.matchAll(new RegExp(CHART_CELL.source, "g"))) {
+    const question = match[1] ?? "";
+    const answer = (match[2] ?? "").toLowerCase();
+    if (!question || seen.has(question)) continue;
+    seen.add(question);
+    cards.push({ question, answer });
+  }
+  if (cards.length < CHART_PAIR_MINIMUM) return null;
+  return cards;
+}
+
 function clip(text: string, max: number): string {
   if (text.length <= max) return text;
   return `${text.slice(0, max - 1).trimEnd()}…`;
@@ -128,9 +147,24 @@ function lineRevisionPack(pairs: PairedLine[]): StudyPack {
   };
 }
 
+function chartRevisionPack(cards: Array<{ question: string; answer: string }>): StudyPack {
+  return {
+    summary: "Revision cards from a katakana chart.",
+    keyPoints: [
+      {
+        kind: "FACT",
+        content: "Each card is a katakana character and its romaji reading.",
+      },
+    ],
+    flashcards: cards,
+  };
+}
+
 export function localRevisionPack(text: string): StudyPack {
   const vocab = kanaKanjiCards(text);
   if (vocab) return vocabRevisionPack(vocab);
+  const chart = katakanaChartCards(text);
+  if (chart) return chartRevisionPack(chart);
   const lines = text
     .split(/\n/)
     .map((line) => line.trim())

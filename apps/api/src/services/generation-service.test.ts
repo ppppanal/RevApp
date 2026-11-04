@@ -233,5 +233,17 @@ describe("StudyGenerationService", () => {
     const kanji = await new StudyGenerationService(vocab, 1000).generate(notes, layout);
     expect(vocab.calls).toBe(0);
     expect(kanji.flashcards).toEqual([{ question: "先生", answer: "せんせい" }]);
+
+    const chart = ["ア a", "カ ka", "シ shi", "ツ tsu", "ン n"].join("\n");
+    const chartProvider = new ScriptedProvider([packA]);
+    const chartPack = await new StudyGenerationService(chartProvider, 1000).generate("cleaned chart", chart);
+    expect(chartProvider.calls).toBe(0);
+    expect(chartPack.flashcards).toEqual([
+      { question: "ア", answer: "a" },
+      { question: "カ", answer: "ka" },
+      { question: "シ", answer: "shi" },
+      { question: "ツ", answer: "tsu" },
+      { question: "ン", answer: "n" },
+    ]);
   });
 });

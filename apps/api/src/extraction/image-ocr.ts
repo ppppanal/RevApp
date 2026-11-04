@@ -2,6 +2,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import tesseract from "tesseract.js";
+import { readKatakanaChart, shouldTryKatakanaChart } from "./katakana-chart";
 
 const require = createRequire(import.meta.url);
 const english = require("@tesseract.js-data/eng") as { langPath: string; gzip?: boolean };
@@ -16,7 +17,10 @@ export function recognizeImageText(data: Uint8Array): Promise<string> {
     const worker = await getWorker();
     try {
       const result = await worker.recognize(Buffer.from(data));
-      return result.data.text ?? "";
+      const text = result.data.text ?? "";
+      if (!shouldTryKatakanaChart(text)) return text;
+      const chart = await readKatakanaChart(data).catch(() => null);
+      return chart ?? text;
     } catch (error) {
       await resetWorker();
       throw error;

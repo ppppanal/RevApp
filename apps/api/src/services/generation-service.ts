@@ -1,6 +1,6 @@
 import { GenerationError } from "../errors";
 import { EMPTY_COMPLETION_MESSAGE } from "../llm/openai-compatible";
-import { kanaKanjiCards, localRevisionPack, paragraphRevisionPack } from "../llm/paired-lines";
+import { kanaKanjiCards, katakanaChartCards, localRevisionPack, paragraphRevisionPack } from "../llm/paired-lines";
 import { parseQuoteCard, type QuoteCard } from "../llm/parse-quote-card";
 import { parseStudyPack, type StudyPack } from "../llm/parse-study-pack";
 import type { ChatMessage, LlmProvider } from "../llm/provider";
@@ -70,6 +70,8 @@ export class StudyGenerationService {
 
   async generate(cleanedText: string, layoutText = cleanedText): Promise<StudyPack> {
     if (kanaKanjiCards(layoutText)) return localRevisionPack(layoutText);
+    const chartSource = [layoutText, cleanedText].find((text) => katakanaChartCards(text));
+    if (chartSource) return localRevisionPack(chartSource);
     const packs: StudyPack[] = [];
     for (const chunk of studyChunks(cleanedText)) {
       packs.push(await this.generateChunk(chunk));
